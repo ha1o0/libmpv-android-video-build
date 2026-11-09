@@ -13,8 +13,7 @@ v_freetype=2-13-0
 v_mbedtls=3.4.0
 v_dav1d=1.2.0
 v_libxml2=2.10.3
-v_ffmpeg=7.1.5
-v_mpv=d99d62cc036f269d272d060b32f2b8dd6f631167
+# mpv / FFmpeg / libplacebo versions and archive hashes live in mobile-sources.json.
 v_libogg=1.3.5
 v_libvorbis=1.3.7
 v_libvpx=1.13

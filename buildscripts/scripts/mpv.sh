@@ -21,7 +21,7 @@ meson setup $build --cross-file "$prefix_dir"/crossfile.txt \
     --default-library shared \
     -Db_lundef=true \
     -Dauto_features=disabled \
-    -Dgl=enabled -Degl=enabled -Degl-android=enabled -Dplain-gl=enabled \
+    -Dgl=enabled -Degl-android=enabled -Dplain-gl=enabled \
     -Dandroid-media-ndk=enabled -Daudiotrack=enabled -Dopensles=enabled \
     -Dvector=enabled -Dzlib=enabled \
     -Dgpl=false \
