@@ -67,7 +67,20 @@ jobs:
           ln -s "$ANDROID_HOME" buildscripts/sdk/android-sdk-linux
       - name: Build existing default bundle
         working-directory: buildscripts
-        run: ./bundle_default.sh
+        run: |
+          set -o pipefail
+          ./bundle_default.sh 2>&1 | tee "$RUNNER_TEMP/mobile-native-build.log"
+      - name: Report native failure context
+        if: failure()
+        run: |
+          python3 - <<'PYTHON'
+          import os
+          from pathlib import Path
+          path = Path(os.environ['RUNNER_TEMP']) / 'mobile-native-build.log'
+          if path.exists():
+              tail = '\n'.join(path.read_text(errors='replace').splitlines()[-70:])[-18000:]
+              print('::error title=Native compiler output::' + tail.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A'))
+          PYTHON
       - name: Validate and package release assets
         env:
           RELEASE_TAG: ${{ inputs.release_tag || format('v0.0.0-ci.{0}', github.run_id) }}

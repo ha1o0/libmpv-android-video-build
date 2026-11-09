@@ -17,4 +17,4 @@ meson setup "$build" --cross-file "$prefix_dir/crossfile.txt" \
 ninja -C "$build" -j"$cores"
 DESTDIR="$prefix_dir" ninja -C "$build" install
 # Keep the mobile bundle self-contained; do not introduce libc++_shared.so.
-sed -i 's/^Libs.private:/Libs.private: -lc++_static -lc++abi/' "$prefix_dir/lib/pkgconfig/libplacebo.pc"
+sed -i '/^Libs:/s/$/ -lc++_static -lc++abi/' "$prefix_dir/lib/pkgconfig/libplacebo.pc"
