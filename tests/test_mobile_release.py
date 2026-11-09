@@ -85,6 +85,13 @@ class ReleaseTests(unittest.TestCase):
         for abi in release.ABIS:
             jar(self.directory, abi)
 
+    def test_rejects_native_source_provenance_mismatch(self):
+        manifest = self.package()
+        manifest['native_sources']['mpv']['commit'] = 'b' * 40
+        (self.directory / release.MANIFEST).write_text(json.dumps(manifest))
+        with self.assertRaises(ValueError):
+            release.verify_release(self.directory, TAG, SHA)
+
     def package(self):
         return release.package_release(self.directory, TAG, SHA)
 

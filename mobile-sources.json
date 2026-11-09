@@ -1,0 +1,30 @@
+{
+  "mpv": {
+    "repository": "ha1o0/mpv",
+    "branch": "zcopy",
+    "commit": "d99d62cc036f269d272d060b32f2b8dd6f631167",
+    "version": "0.41.0-zcopy-d99d62cc",
+    "url": "https://github.com/ha1o0/mpv/archive/d99d62cc036f269d272d060b32f2b8dd6f631167.tar.gz",
+    "sha256": "2df598cf77ce8e8003343b3ea8cd8232b6a278ed560dbc663e1f1f7beae9d728"
+  },
+  "ffmpeg": {
+    "version": "7.1.5",
+    "url": "https://ffmpeg.org/releases/ffmpeg-7.1.5.tar.xz",
+    "sha256": "de668509caf9e35e3cd162473441fdb29538c6d96ed080292b3cf9e6fc5d558f"
+  },
+  "libplacebo": {
+    "version": "7.360.1",
+    "url": "https://github.com/haasn/libplacebo/archive/refs/tags/v7.360.1.tar.gz",
+    "sha256": "d05fdf90bea2f629eaa2d115e909fd356388ac639e54f77b87a018a6d76224bd"
+  },
+  "fast_float": {
+    "version": "8.0.2",
+    "url": "https://github.com/fastfloat/fast_float/archive/refs/tags/v8.0.2.tar.gz",
+    "sha256": "e14a33089712b681d74d94e2a11362643bd7d769ae8f7e7caefe955f57f7eacd"
+  },
+  "vulkan_headers": {
+    "version": "1.4.357.0",
+    "url": "https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/tags/vulkan-sdk-1.4.357.0.tar.gz",
+    "sha256": "e87dce08116151f6b6d7de6b6faf41498e87e6cf848ff16fa3bd5402190ad4a3"
+  }
+}

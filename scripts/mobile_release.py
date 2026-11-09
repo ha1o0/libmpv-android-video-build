@@ -19,6 +19,11 @@ CHECKSUMS = "SHA256SUMS"
 MAX_LIBRARY_SIZE = 256 * 1024 * 1024
 
 
+def native_sources():
+    """Bind release provenance to the source archives consumed by this checkout."""
+    return json.loads((Path(__file__).resolve().parents[1] / 'mobile-sources.json').read_text())
+
+
 def validate_identity(tag, source_commit, request_id="", workflow_run_id=None):
     if not re.fullmatch(r"v[0-9][A-Za-z0-9._-]{0,126}", tag):
         raise ValueError("release_tag must start with v + digit and use only letters, digits, dot, underscore or hyphen")
@@ -126,7 +131,7 @@ def package_release(directory, tag, source_commit, request_id="", workflow_run_i
         raise ValueError(f"Expected exactly four default ABI JARs; found {sorted(actual)}")
     assets = [asset_record(directory / f"default-{abi}.jar", abi) for abi in ABIS]
     manifest = {"schema_version": 1, "platform": "android", "repository": REPOSITORY,
-                "tag": tag, "source_commit": source_commit,
+                "tag": tag, "source_commit": source_commit, "native_sources": native_sources(),
                 "request_id": request_id, "assets": assets}
     if workflow_run_id is not None:
         manifest["workflow_run_id"] = workflow_run_id
@@ -143,7 +148,7 @@ def verify_release(directory, tag, source_commit, request_id="", workflow_run_id
     manifest_path = directory / MANIFEST
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     expected = {"schema_version": 1, "platform": "android", "repository": REPOSITORY,
-                "tag": tag, "source_commit": source_commit,
+                "tag": tag, "source_commit": source_commit, "native_sources": native_sources(),
                 "request_id": request_id,
                 "assets": [asset_record(directory / f"default-{abi}.jar", abi) for abi in ABIS]}
     if workflow_run_id is not None:

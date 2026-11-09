@@ -1,7 +1,9 @@
 name: Android libmpv release
-run-name: Android libmpv ${{ inputs.release_tag }} · ${{ inputs.request_id }}
+run-name: Android libmpv ${{ inputs.release_tag || format('v0.0.0-ci.{0}', github.run_id) }} · ${{ inputs.request_id }}
 
 on:
+  push:
+    branches: [codex/mobile-native-validation]
   workflow_dispatch:
     inputs:
       release_tag:
@@ -18,7 +20,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: android-release-${{ inputs.release_tag }}
+  group: android-release-${{ inputs.release_tag || format('v0.0.0-ci.{0}', github.run_id) }}
   cancel-in-progress: false
 
 jobs:
@@ -33,7 +35,7 @@ jobs:
           persist-credentials: false
       - name: Validate inputs and release availability
         env:
-          RELEASE_TAG: ${{ inputs.release_tag }}
+          RELEASE_TAG: ${{ inputs.release_tag || format('v0.0.0-ci.{0}', github.run_id) }}
           REQUEST_ID: ${{ inputs.request_id }}
           SOURCE_COMMIT: ${{ github.sha }}
           WORKFLOW_RUN_ID: ${{ github.run_id }}
@@ -68,7 +70,7 @@ jobs:
         run: ./bundle_default.sh
       - name: Validate and package release assets
         env:
-          RELEASE_TAG: ${{ inputs.release_tag }}
+          RELEASE_TAG: ${{ inputs.release_tag || format('v0.0.0-ci.{0}', github.run_id) }}
           REQUEST_ID: ${{ inputs.request_id }}
           SOURCE_COMMIT: ${{ github.sha }}
           WORKFLOW_RUN_ID: ${{ github.run_id }}
@@ -90,6 +92,7 @@ jobs:
           retention-days: 14
 
   publish:
+    if: github.event_name == 'workflow_dispatch'
     name: Publish immutable-name prerelease
     needs: build
     runs-on: ubuntu-22.04
@@ -107,7 +110,7 @@ jobs:
           path: release
       - name: Revalidate and publish new tag
         env:
-          RELEASE_TAG: ${{ inputs.release_tag }}
+          RELEASE_TAG: ${{ inputs.release_tag || format('v0.0.0-ci.{0}', github.run_id) }}
           REQUEST_ID: ${{ inputs.request_id }}
           SOURCE_COMMIT: ${{ github.sha }}
           WORKFLOW_RUN_ID: ${{ github.run_id }}
@@ -131,4 +134,8 @@ jobs:
           printf 'Validation: %s; build: %s; publication: %s\n' "$VALIDATION" "$BUILD" "$PUBLICATION" >> "$GITHUB_STEP_SUMMARY"
           test "$VALIDATION" = success
           test "$BUILD" = success
-          test "$PUBLICATION" = success
+          if [ "${{ github.event_name }}" = workflow_dispatch ]; then
+            test "$PUBLICATION" = success
+          else
+            test "$PUBLICATION" = skipped
+          fi

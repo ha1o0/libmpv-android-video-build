@@ -6,27 +6,31 @@
 build=_build$ndk_suffix
 
 if [ "$1" == "build" ]; then
-	true
+    true
 elif [ "$1" == "clean" ]; then
-	rm -rf _build$ndk_suffix
-	exit 0
+    rm -rf _build$ndk_suffix
+    exit 0
 else
-	exit 255
+    exit 255
 fi
 
 unset CC CXX # meson wants these unset
 
 meson setup $build --cross-file "$prefix_dir"/crossfile.txt \
-	--prefer-static \
-	--default-library shared \
-	-Dgpl=false \
-	-Dlibmpv=true \
- 	-Dlua=disabled \
- 	-Dcplayer=false \
-	-Diconv=disabled \
-	-Dvulkan=disabled \
-   	-Dlibplacebo=disabled \
- 	-Dmanpage-build=disabled
+    --prefer-static \
+    --default-library shared \
+    -Db_lundef=true \
+    -Dauto_features=disabled \
+    -Dgl=enabled -Degl=enabled -Degl-android=enabled -Dplain-gl=enabled \
+    -Dandroid-media-ndk=enabled -Daudiotrack=enabled -Dopensles=enabled \
+    -Dvector=enabled -Dzlib=enabled \
+    -Dgpl=false \
+    -Dlibmpv=true \
+    -Dlua=disabled \
+    -Dcplayer=false \
+    -Diconv=disabled \
+    -Dvulkan=disabled \
+    -Dmanpage-build=disabled
 
 ninja -C $build -j$cores
 DESTDIR="$prefix_dir" ninja -C $build install

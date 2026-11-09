@@ -9,10 +9,9 @@ for dep_path in "${PATCHES[@]}"; do
         dep=$(echo $dep_path |cut -d/ -f 2)
         cd deps/$dep
         echo Patching $dep
-        git reset --hard
         for patch in "${patches[@]}"; do
             echo Applying $patch
-            git apply "$ROOT/$patch"
+            patch --batch --forward -p1 < "$ROOT/$patch"
         done
         cd $ROOT
     fi
