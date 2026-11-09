@@ -10,3 +10,12 @@ obj
 build
 local.properties
 *~
+
+# Downloaded native build inputs and release outputs
+/buildscripts/deps/
+/buildscripts/prefix/
+/buildscripts/sdk/
+/buildscripts/artifacts/
+/buildscripts/*.zip
+/buildscripts/scripts/ffmpeg.sh
+__pycache__/

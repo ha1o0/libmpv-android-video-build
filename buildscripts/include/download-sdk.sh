@@ -62,7 +62,9 @@ sdkmanager () {
 }
 echo y | sdkmanager \
 	"platforms;android-33" \
+	"platforms;android-35" \
 	"build-tools;${v_sdk_build_tools}" \
+	"build-tools;34.0.0" \
 	"ndk;${v_ndk}" \
 	"cmake;3.22.1"
 

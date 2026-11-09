@@ -1,0 +1,134 @@
+name: Android libmpv release
+run-name: Android libmpv ${{ inputs.release_tag }} · ${{ inputs.request_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'New prerelease tag, e.g. v1.1.9-android.1 (never reused)'
+        required: true
+        type: string
+      request_id:
+        description: 'Optional caller correlation ID (letters, digits, hyphens)'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-release-${{ inputs.release_tag }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate release request
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Validate inputs and release availability
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          REQUEST_ID: ${{ inputs.request_id }}
+          SOURCE_COMMIT: ${{ github.sha }}
+          WORKFLOW_RUN_ID: ${{ github.run_id }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python3 scripts/mobile_release.py identity --tag "$RELEASE_TAG" --source-commit "$SOURCE_COMMIT" --request-id "$REQUEST_ID" --workflow-run-id "$WORKFLOW_RUN_ID"
+          python3 -m unittest discover -s tests -v
+          python3 scripts/github_mobile_release.py preflight --tag "$RELEASE_TAG" --source-commit "$SOURCE_COMMIT" --request-id "$REQUEST_ID" --workflow-run-id "$WORKFLOW_RUN_ID"
+
+  build:
+    name: Build default flavor (four ABIs)
+    needs: validate
+    runs-on: ubuntu-22.04
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Use runner Android SDK
+        shell: bash
+        run: |
+          mkdir -p buildscripts/sdk
+          ln -s "$ANDROID_HOME" buildscripts/sdk/android-sdk-linux
+      - name: Build existing default bundle
+        working-directory: buildscripts
+        run: ./bundle_default.sh
+      - name: Validate and package release assets
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          REQUEST_ID: ${{ inputs.request_id }}
+          SOURCE_COMMIT: ${{ github.sha }}
+          WORKFLOW_RUN_ID: ${{ github.run_id }}
+        run: |
+          python3 scripts/mobile_release.py package --directory buildscripts/artifacts/default --tag "$RELEASE_TAG" --source-commit "$SOURCE_COMMIT" --request-id "$REQUEST_ID" --workflow-run-id "$WORKFLOW_RUN_ID"
+          python3 scripts/mobile_release.py verify --directory buildscripts/artifacts/default --tag "$RELEASE_TAG" --source-commit "$SOURCE_COMMIT" --request-id "$REQUEST_ID" --workflow-run-id "$WORKFLOW_RUN_ID"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-release-${{ github.run_id }}-${{ github.run_attempt }}
+          path: buildscripts/artifacts/default/*
+          if-no-files-found: error
+          retention-days: 14
+      - name: Preserve debug symbols
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-debug-symbols-${{ github.run_id }}-${{ github.run_attempt }}
+          path: buildscripts/debug-symbols-default.zip
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Publish immutable-name prerelease
+    needs: build
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: android-release-${{ github.run_id }}-${{ github.run_attempt }}
+          path: release
+      - name: Revalidate and publish new tag
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          REQUEST_ID: ${{ inputs.request_id }}
+          SOURCE_COMMIT: ${{ github.sha }}
+          WORKFLOW_RUN_ID: ${{ github.run_id }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python3 scripts/github_mobile_release.py publish --directory release --tag "$RELEASE_TAG" --source-commit "$SOURCE_COMMIT" --request-id "$REQUEST_ID" --workflow-run-id "$WORKFLOW_RUN_ID"
+
+  release-status:
+    name: Android release status
+    if: always()
+    needs: [validate, build, publish]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - name: Require completed validation, build and publication
+        env:
+          VALIDATION: ${{ needs.validate.result }}
+          BUILD: ${{ needs.build.result }}
+          PUBLICATION: ${{ needs.publish.result }}
+        run: |
+          printf 'Validation: %s; build: %s; publication: %s\n' "$VALIDATION" "$BUILD" "$PUBLICATION" >> "$GITHUB_STEP_SUMMARY"
+          test "$VALIDATION" = success
+          test "$BUILD" = success
+          test "$PUBLICATION" = success

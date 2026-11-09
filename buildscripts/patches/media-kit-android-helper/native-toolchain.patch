@@ -1,0 +1,26 @@
+diff --git a/app/build.gradle b/app/build.gradle
+index 52ff41e..5fd0561 100644
+--- a/app/build.gradle
++++ b/app/build.gradle
+@@ -5,6 +5,8 @@ plugins {
+ android {
+     namespace 'com.alexmercerind.mediakitandroidhelper'
+     compileSdk 35
++    ndkVersion '25.2.9519653'
++    buildToolsVersion '34.0.0'
+
+     defaultConfig {
+         applicationId "com.alexmercerind.mediakitandroidhelper"
+@@ -13,5 +15,12 @@ android {
+         versionCode 1
+         versionName "1.0"
+
++        externalNativeBuild {
++            cmake {
++                // This helper exports a C ABI. Keep its C++ runtime private,
++                // avoiding the old NDK's 4 KiB-aligned libc++_shared.so.
++                arguments '-DANDROID_STL=c++_static'
++            }
++        }
+         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+     }

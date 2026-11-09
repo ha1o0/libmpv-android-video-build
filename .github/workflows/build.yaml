@@ -1,68 +1,23 @@
-name: Build libmpv-android
+name: Validate Android build automation
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   pull_request:
   workflow_dispatch:
-    inputs:
-      logLevel:
-        description: 'Log level'
-        required: true
-        default: 'warning'
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  build:
-    name: Build
+  validate:
     runs-on: ubuntu-22.04
+    timeout-minutes: 10
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      - name: Setup Java JDK
-        uses: actions/setup-java@v4
+      - uses: actions/checkout@v4
         with:
-          distribution: temurin
-          java-version: 17
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
-      - name: Symlink SDK
-        working-directory: ./buildscripts
+          persist-credentials: false
+      - name: Validate release tools without building native libraries
         run: |
-          mkdir sdk
-          ln -s ${ANDROID_HOME} ./sdk/android-sdk-linux
-      - name: Bundle (default)
-        working-directory: ./buildscripts
-        run: |
-          sudo chmod +x bundle_default.sh
-          ./bundle_default.sh
-      - name: Bundle (full)
-        working-directory: ./buildscripts
-        run: |
-          sudo chmod +x bundle_full.sh
-          ./bundle_full.sh
-      - name: Bundle (encoders-gpl)
-        working-directory: ./buildscripts
-        run: |
-          sudo chmod +x bundle_encoders-gpl.sh
-          ./bundle_encoders-gpl.sh
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: artifact
-          path: |
-            ./buildscripts/*.jar
-            ./buildscripts/artifacts/**
-      - name: Upload Release
-        uses: softprops/action-gh-release@v1
-        if: github.ref == 'refs/heads/main'
-        with:
-          draft: true
-          prerelease: false
-          tag_name: "vnext"
-          files: |
-            buildscripts/*.zip
-            buildscripts/artifacts/**
+          python3 -m unittest discover -s tests -v
+          bash -n buildscripts/bundle_default.sh buildscripts/build.sh buildscripts/download.sh buildscripts/patch.sh
