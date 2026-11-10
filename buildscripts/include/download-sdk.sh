@@ -58,9 +58,21 @@ fi
 sdkmanager () {
 	local exe="./android-sdk-$os/cmdline-tools/latest/bin/sdkmanager"
 	[ -x "$exe" ] || exe="./android-sdk-$os/cmdline-tools/bin/sdkmanager"
-	"$exe" --sdk_root="${ANDROID_HOME}" "$@"
+	local attempt status
+	# SDK repository manifests occasionally time out on hosted runners. Installed
+	# packages are reused, and all three failed attempts still fail the build.
+	for attempt in 1 2 3; do
+		if "$exe" --sdk_root="${ANDROID_HOME}" "$@" <<< y; then
+			return 0
+		else
+			status=$?
+		fi
+		[ "$attempt" -eq 3 ] && return "$status"
+		echo "SDK installation failed (attempt $attempt); retrying in 15 seconds" >&2
+		sleep 15
+	done
 }
-echo y | sdkmanager \
+sdkmanager \
 	"platforms;android-33" \
 	"platforms;android-35" \
 	"build-tools;${v_sdk_build_tools}" \
