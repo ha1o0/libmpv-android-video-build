@@ -20,4 +20,4 @@ jobs:
       - name: Validate release tools without building native libraries
         run: |
           python3 -m unittest discover -s tests -v
-          bash -n buildscripts/bundle_default.sh buildscripts/build.sh buildscripts/download.sh buildscripts/patch.sh
+          bash -n buildscripts/bundle_default.sh buildscripts/build.sh buildscripts/download.sh buildscripts/patch.sh buildscripts/flavors/default.sh scripts/test_audio_rematrix.sh

@@ -48,7 +48,6 @@ cpuflags=
 	--disable-filters \
 	--disable-doc \
 	--disable-avdevice \
-	--disable-postproc \
 	--disable-programs \
 	--disable-gray \
 	--disable-swscale-alpha \
@@ -117,12 +116,14 @@ cpuflags=
 	--enable-decoder=mp2* \
 	--enable-decoder=mp3* \
 	--enable-decoder=mpc* \
+	--enable-decoder=mlp \
 	--enable-decoder=opus \
 	--enable-decoder=ra* \
 	--enable-decoder=ralf \
 	--enable-decoder=shorten \
 	--enable-decoder=tak \
 	--enable-decoder=tta \
+	--enable-decoder=truehd \
 	--enable-decoder=vorbis \
 	--enable-decoder=wavpack \
 	--enable-decoder=wma* \
@@ -190,6 +191,7 @@ cpuflags=
 	--enable-demuxer=wv \
 	--enable-demuxer=xwma \
 	--enable-demuxer=dsf \
+	--enable-demuxer=mlp \
 	--enable-demuxer=truehd \
         --enable-demuxer=dts \
         --enable-demuxer=dtshd \
@@ -215,6 +217,7 @@ cpuflags=
 	--enable-parser=dca \
 	--enable-parser=flac \
 	--enable-parser=gsm \
+	--enable-parser=mlp \
 	--enable-parser=mpegaudio \
 	--enable-parser=tak \
 	--enable-parser=vorbis \
@@ -258,7 +261,6 @@ make -j$cores
 make DESTDIR="$prefix_dir" install
 
 ln -sf "$prefix_dir"/lib/libswresample.so "$native_dir"
-ln -sf "$prefix_dir"/lib/libpostproc.so "$native_dir"
 ln -sf "$prefix_dir"/lib/libavutil.so "$native_dir"
 ln -sf "$prefix_dir"/lib/libavcodec.so "$native_dir"
 ln -sf "$prefix_dir"/lib/libavformat.so "$native_dir"

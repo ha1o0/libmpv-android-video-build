@@ -43,6 +43,7 @@ jobs:
         run: |
           python3 scripts/mobile_release.py identity --tag "$RELEASE_TAG" --source-commit "$SOURCE_COMMIT" --request-id "$REQUEST_ID" --workflow-run-id "$WORKFLOW_RUN_ID"
           python3 -m unittest discover -s tests -v
+          bash scripts/test_audio_rematrix.sh
           python3 scripts/github_mobile_release.py preflight --tag "$RELEASE_TAG" --source-commit "$SOURCE_COMMIT" --request-id "$REQUEST_ID" --workflow-run-id "$WORKFLOW_RUN_ID"
 
   build:
@@ -82,6 +83,11 @@ jobs:
               tail = '\n'.join(path.read_text(errors='replace').splitlines()[-25:])[-3500:]
               print('::error title=Native compiler output::' + tail.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A'))
           PYTHON
+      - name: Require Dolby and DTS codecs in all four ABI libraries
+        run: |
+          . buildscripts/include/depinfo.sh
+          python3 scripts/check_audio_codecs.py buildscripts/artifacts/default \
+            --nm "buildscripts/sdk/android-sdk-linux/ndk/$v_ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm"
       - name: Validate and package release assets
         env:
           RELEASE_TAG: ${{ inputs.release_tag || format('v0.0.0-ci.{0}', github.run_id) }}

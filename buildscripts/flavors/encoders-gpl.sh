@@ -52,7 +52,6 @@ cpuflags=
 	--disable-devices \
 	--disable-doc \
 	--disable-avdevice \
-	--disable-postproc \
 	--disable-programs \
 	--disable-gray \
 	--disable-swscale-alpha \
@@ -119,7 +118,6 @@ make -j$cores
 make DESTDIR="$prefix_dir" install
 
 ln -sf "$prefix_dir"/lib/libswresample.so "$native_dir"
-ln -sf "$prefix_dir"/lib/libpostproc.so "$native_dir"
 ln -sf "$prefix_dir"/lib/libavutil.so "$native_dir"
 ln -sf "$prefix_dir"/lib/libavcodec.so "$native_dir"
 ln -sf "$prefix_dir"/lib/libavformat.so "$native_dir"
