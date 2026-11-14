@@ -1,6 +1,6 @@
 --- a/video/decode/vd_lavc.c
 +++ b/video/decode/vd_lavc.c
-@@ -560,6 +560,16 @@
+@@ -560,6 +560,17 @@
                  if (!hw_codec || strcmp(hw_codec, codec) != 0)
                      continue;
  
