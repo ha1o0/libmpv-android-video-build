@@ -44,6 +44,7 @@ jobs:
           python3 scripts/mobile_release.py identity --tag "$RELEASE_TAG" --source-commit "$SOURCE_COMMIT" --request-id "$REQUEST_ID" --workflow-run-id "$WORKFLOW_RUN_ID"
           python3 -m unittest discover -s tests -v
           bash scripts/test_audio_rematrix.sh
+          bash scripts/test_mediacodec_dovi.sh
           python3 scripts/github_mobile_release.py preflight --tag "$RELEASE_TAG" --source-commit "$SOURCE_COMMIT" --request-id "$REQUEST_ID" --workflow-run-id "$WORKFLOW_RUN_ID"
 
   build:

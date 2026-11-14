@@ -14,6 +14,9 @@ from mobile_release import ABIS, inspect_jar
 # (including the channel-based audio in DTS:X) also needs the XLL implementation.
 REQUIRED_SYMBOLS = frozenset({
     "ff_aac_decoder",
+    "ff_hevc_mediacodec_decoder",
+    "ff_mediacodec_dovi_submit",
+    "ff_mediacodec_dovi_attach",
     "ff_ass_decoder",
     "ff_ssa_decoder",
     "ff_pgssub_decoder",

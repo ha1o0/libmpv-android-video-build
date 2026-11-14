@@ -1,0 +1,423 @@
+--- a/configure
++++ b/configure
+@@ -3603,7 +3603,7 @@
+ hevc_cuvid_decoder_select="hevc_mp4toannexb_bsf"
+ hevc_d3d12va_encoder_select="cbs_h265 d3d12va_encode"
+ hevc_mediacodec_decoder_deps="mediacodec"
+-hevc_mediacodec_decoder_select="hevc_mp4toannexb_bsf hevc_parser"
++hevc_mediacodec_decoder_select="hevc_mp4toannexb_bsf hevc_parser dovi_rpudec"
+ hevc_mediacodec_encoder_deps="mediacodec"
+ hevc_mediacodec_encoder_select="extract_extradata_bsf hevc_metadata"
+ hevc_mf_encoder_deps="mediafoundation"
+--- a/libavcodec/Makefile
++++ b/libavcodec/Makefile
+@@ -467,7 +467,7 @@
+ OBJS-$(CONFIG_HEVC_CUVID_DECODER)      += cuviddec.o
+ OBJS-$(CONFIG_HEVC_D3D12VA_ENCODER)    += d3d12va_encode_hevc.o h265_profile_level.o \
+                                           h2645data.o hw_base_encode_h265.o
+-OBJS-$(CONFIG_HEVC_MEDIACODEC_DECODER) += mediacodecdec.o
++OBJS-$(CONFIG_HEVC_MEDIACODEC_DECODER) += mediacodecdec.o mediacodec_dovi.o
+ OBJS-$(CONFIG_HEVC_MEDIACODEC_ENCODER) += mediacodecenc.o
+ OBJS-$(CONFIG_HEVC_MF_ENCODER)         += mfenc.o mf_utils.o
+ OBJS-$(CONFIG_HEVC_NVENC_ENCODER)      += nvenc_hevc.o nvenc.o
+--- a/libavcodec/mediacodecdec.c
++++ b/libavcodec/mediacodecdec.c
+@@ -44,6 +44,9 @@
+ #include "jni.h"
+ #include "mediacodec_wrapper.h"
+ #include "mediacodecdec_common.h"
++#if CONFIG_HEVC_MEDIACODEC_DECODER
++#include "mediacodec_dovi.h"
++#endif
+
+ typedef struct MediaCodecH264DecContext {
+
+@@ -59,6 +62,9 @@
+     int use_ndk_codec;
+     // Ref. MediaFormat KEY_OPERATING_RATE
+     int operating_rate;
++#if CONFIG_HEVC_MEDIACODEC_DECODER
++    FFMediaCodecDovi dovi;
++#endif
+ } MediaCodecH264DecContext;
+
+ static av_cold int mediacodec_decode_close(AVCodecContext *avctx)
+@@ -69,6 +75,9 @@
+     s->ctx = NULL;
+
+     av_packet_unref(&s->buffered_pkt);
++#if CONFIG_HEVC_MEDIACODEC_DECODER
++    ff_mediacodec_dovi_close(&s->dovi);
++#endif
+
+     return 0;
+ }
+@@ -315,6 +324,10 @@
+     FFAMediaFormat *format = NULL;
+     MediaCodecH264DecContext *s = avctx->priv_data;
+
++#if CONFIG_HEVC_MEDIACODEC_DECODER
++    ff_mediacodec_dovi_init(&s->dovi, avctx);
++#endif
++
+     if (s->use_ndk_codec < 0)
+         s->use_ndk_codec = !av_jni_get_java_vm(avctx);
+
+@@ -347,6 +360,11 @@
+ #if CONFIG_HEVC_MEDIACODEC_DECODER
+     case AV_CODEC_ID_HEVC:
+         codec_mime = "video/hevc";
++        if (s->dovi.enabled) {
++            /* Android COLOR_FormatYUVP010; no platform YUV-to-RGB conversion. */
++            ff_AMediaFormat_setInt32(format, "color-format", 54);
++            av_log(avctx, AV_LOG_INFO, "P5 MediaCodec: requesting P010 hardware output with RPU transport\n");
++        }
+
+         ret = hevc_set_extradata(avctx, format);
+         if (ret < 0)
+@@ -486,7 +504,7 @@
+     return ret;
+ }
+
+-static int mediacodec_receive_frame(AVCodecContext *avctx, AVFrame *frame)
++static int mediacodec_receive_frame_internal(AVCodecContext *avctx, AVFrame *frame)
+ {
+     MediaCodecH264DecContext *s = avctx->priv_data;
+     int ret;
+@@ -564,11 +582,30 @@
+         } else if (ret < 0) {
+             return ret;
+         }
++#if CONFIG_HEVC_MEDIACODEC_DECODER
++        ret = ff_mediacodec_dovi_submit(&s->dovi, avctx, &s->buffered_pkt);
++        if (ret < 0)
++            return ret;
++#endif
+     }
+
+     return AVERROR(EAGAIN);
+ }
+
++static int mediacodec_receive_frame(AVCodecContext *avctx, AVFrame *frame)
++{
++    int ret = mediacodec_receive_frame_internal(avctx, frame);
++#if CONFIG_HEVC_MEDIACODEC_DECODER
++    MediaCodecH264DecContext *s = avctx->priv_data;
++    if (ret >= 0) {
++        ret = ff_mediacodec_dovi_attach(&s->dovi, avctx, frame);
++        if (ret < 0)
++            av_frame_unref(frame);
++    }
++#endif
++    return ret;
++}
++
+ static void mediacodec_decode_flush(AVCodecContext *avctx)
+ {
+     MediaCodecH264DecContext *s = avctx->priv_data;
+@@ -576,6 +613,9 @@
+     av_packet_unref(&s->buffered_pkt);
+
+     ff_mediacodec_dec_flush(avctx, s->ctx);
++#if CONFIG_HEVC_MEDIACODEC_DECODER
++    ff_mediacodec_dovi_flush(&s->dovi);
++#endif
+ }
+
+ static const AVCodecHWConfigInternal *const mediacodec_hw_configs[] = {
+--- a/libavcodec/mediacodecdec_common.c
++++ b/libavcodec/mediacodecdec_common.c
+@@ -39,6 +39,7 @@
+ #include "mediacodec.h"
+ #include "mediacodec_surface.h"
+ #include "mediacodec_sw_buffer.h"
++#include "mediacodec_p010.h"
+ #include "mediacodec_wrapper.h"
+ #include "mediacodecdec_common.h"
+
+@@ -189,6 +190,7 @@
+ }
+
+ enum {
++    COLOR_FormatYUVP010 = 54,
+     COLOR_FormatYUV420Planar                              = 0x13,
+     COLOR_FormatYUV420SemiPlanar                          = 0x15,
+     COLOR_FormatYCbYCr                                    = 0x19,
+@@ -207,6 +209,7 @@
+
+ } color_formats[] = {
+
++    { COLOR_FormatYUVP010,                                 AV_PIX_FMT_P010LE  },
+     { COLOR_FormatYUV420Planar,                              AV_PIX_FMT_YUV420P },
+     { COLOR_FormatYUV420SemiPlanar,                          AV_PIX_FMT_NV12    },
+     { COLOR_QCOM_FormatYUV420SemiPlanar,                     AV_PIX_FMT_NV12    },
+@@ -486,6 +489,16 @@
+             frame->linesize[0], frame->linesize[1], frame->linesize[2]);
+
+     switch (s->color_format) {
++    case COLOR_FormatYUVP010:
++        ret = ff_mediacodec_copy_p010(frame->data[0], frame->linesize[0],
++            frame->data[1], frame->linesize[1], data, size, info->offset, info->size,
++            s->stride, s->slice_height, s->crop_left, s->crop_top,
++            avctx->width, avctx->height);
++        if (ret < 0) {
++            av_log(avctx, AV_LOG_ERROR, "Invalid P010 hardware output buffer layout\n");
++            goto done;
++        }
++        break;
+     case COLOR_FormatYUV420Planar:
+         ff_mediacodec_sw_buffer_copy_yuv420_planar(avctx, s, data, size, info, frame);
+         break;
+@@ -595,6 +608,18 @@
+         goto fail;
+     }
+
++    if (s->color_format == COLOR_FormatYUVP010) {
++        /* Android reports byte stride, which is twice the pixel width for P010. */
++        AMEDIAFORMAT_GET_INT32(s->stride, "stride", 0);
++        if (s->stride <= 0) {
++            if (s->width <= 0 || s->width > INT_MAX / 2) {
++                ret = AVERROR_INVALIDDATA;
++                goto fail;
++            }
++            s->stride = s->width * 2;
++        }
++    }
++
+     /* Optional fields */
+     AMEDIAFORMAT_GET_INT32(s->crop_top,    "crop-top",    0);
+     AMEDIAFORMAT_GET_INT32(s->crop_bottom, "crop-bottom", 0);
+--- /dev/null
++++ b/libavcodec/mediacodec_dovi.h
+@@ -0,0 +1,27 @@
++/* Dolby Vision metadata transport for the Android MediaCodec HEVC wrapper.
++ * SPDX-License-Identifier: LGPL-2.1-or-later
++ */
++#ifndef AVCODEC_MEDIACODEC_DOVI_H
++#define AVCODEC_MEDIACODEC_DOVI_H
++
++#include "dovi_rpu.h"
++#include "h2645_parse.h"
++
++#define FF_MEDIACODEC_DOVI_PENDING 128
++
++typedef struct FFMediaCodecDovi {
++    int enabled;
++    DOVIContext parser;
++    H2645Packet packet;
++    /* Snapshots are keyed by the timestamp MediaCodec returns, not decode order. */
++    AVFrame *pending[FF_MEDIACODEC_DOVI_PENDING];
++} FFMediaCodecDovi;
++
++void ff_mediacodec_dovi_init(FFMediaCodecDovi *s, AVCodecContext *avctx);
++void ff_mediacodec_dovi_flush(FFMediaCodecDovi *s);
++void ff_mediacodec_dovi_close(FFMediaCodecDovi *s);
++int ff_mediacodec_dovi_submit(FFMediaCodecDovi *s, AVCodecContext *avctx,
++                            const AVPacket *packet);
++int ff_mediacodec_dovi_attach(FFMediaCodecDovi *s, AVCodecContext *avctx,
++                            AVFrame *frame);
++#endif
+--- /dev/null
++++ b/libavcodec/mediacodec_dovi.c
+@@ -0,0 +1,154 @@
++/* Dolby Vision metadata transport for the Android MediaCodec HEVC wrapper.
++ * SPDX-License-Identifier: LGPL-2.1-or-later
++ */
++#include "libavutil/mathematics.h"
++#include "decode.h"
++#include "hevc/hevc.h"
++#include "mediacodec_dovi.h"
++
++void ff_mediacodec_dovi_init(FFMediaCodecDovi *s, AVCodecContext *avctx)
++{
++    const AVPacketSideData *sd;
++    s->parser.logctx = avctx;
++    if (avctx->codec_id != AV_CODEC_ID_HEVC)
++        return;
++    sd = ff_get_coded_side_data(avctx, AV_PKT_DATA_DOVI_CONF);
++    if (sd && sd->size >= sizeof(s->parser.cfg)) {
++        s->parser.cfg = *(const AVDOVIDecoderConfigurationRecord *)sd->data;
++        s->enabled = s->parser.cfg.dv_profile == 5;
++    }
++}
++
++void ff_mediacodec_dovi_flush(FFMediaCodecDovi *s)
++{
++    for (int i = 0; i < FF_MEDIACODEC_DOVI_PENDING; i++)
++        av_frame_free(&s->pending[i]);
++    ff_dovi_ctx_flush(&s->parser);
++}
++
++void ff_mediacodec_dovi_close(FFMediaCodecDovi *s)
++{
++    ff_mediacodec_dovi_flush(s);
++    ff_h2645_packet_uninit(&s->packet);
++    ff_dovi_ctx_unref(&s->parser);
++}
++
++int ff_mediacodec_dovi_submit(FFMediaCodecDovi *s, AVCodecContext *avctx,
++                            const AVPacket *packet)
++{
++    AVFrame *metadata = NULL;
++    const H2645NAL *rpu = NULL;
++    int ret, has_picture = 0, slot = -1;
++    int64_t pts;
++    if (!s->enabled)
++        return 0;
++    ret = ff_h2645_packet_split(&s->packet, packet->data, packet->size,
++                               avctx, 0, AV_CODEC_ID_HEVC, H2645_FLAG_SMALL_PADDING);
++    if (ret < 0)
++        return ret;
++    for (int i = 0; i < s->packet.nb_nals; i++) {
++        const H2645NAL *nal = &s->packet.nals[i];
++        if (nal->nuh_layer_id)
++            continue;
++        has_picture |= nal->type <= 31;
++        if (nal->type == HEVC_NAL_UNSPEC62 && !nal->temporal_id && nal->size > 2) {
++            rpu = nal;
++            ret = ff_dovi_rpu_parse(&s->parser, nal->data + 2, nal->size - 2,
++                                    avctx->err_recognition);
++            if (ret < 0)
++                return ret;
++        }
++    }
++    if (!has_picture)
++        return 0;
++    if (packet->pts == AV_NOPTS_VALUE) {
++        av_log(avctx, AV_LOG_ERROR, "P5 hardware decode requires frame timestamps\n");
++        return AVERROR_INVALIDDATA;
++    }
++    pts = packet->pts;
++    /* Mirror the wrapper's microsecond conversion in both directions. */
++    if (avctx->pkt_timebase.num && avctx->pkt_timebase.den) {
++        pts = av_rescale_q(pts, avctx->pkt_timebase, AV_TIME_BASE_Q);
++        pts = av_rescale_q(pts, AV_TIME_BASE_Q, avctx->pkt_timebase);
++    }
++    for (int i = 0; i < FF_MEDIACODEC_DOVI_PENDING; i++) {
++        if (!s->pending[i] && slot < 0)
++            slot = i;
++        if (s->pending[i] && s->pending[i]->pts == pts) {
++            av_log(avctx, AV_LOG_ERROR, "Ambiguous P5 hardware frame timestamp\n");
++            return AVERROR_INVALIDDATA;
++        }
++    }
++    if (slot < 0) {
++        av_log(avctx, AV_LOG_ERROR, "P5 hardware metadata queue exhausted\n");
++        return AVERROR_INVALIDDATA;
++    }
++    metadata = av_frame_alloc();
++    if (!metadata)
++        return AVERROR(ENOMEM);
++    metadata->pts = pts;
++    ret = ff_dovi_attach_side_data(&s->parser, metadata);
++    if (ret < 0)
++        goto fail;
++    if (!av_frame_get_side_data(metadata, AV_FRAME_DATA_DOVI_METADATA)) {
++        av_log(avctx, AV_LOG_ERROR, "P5 hardware frame has no Dolby Vision metadata\n");
++        ret = AVERROR_INVALIDDATA;
++        goto fail;
++    }
++    if (rpu) {
++        AVFrameSideData *sd = av_frame_new_side_data(metadata,
++            AV_FRAME_DATA_DOVI_RPU_BUFFER, rpu->raw_size - 2);
++        if (!sd) {
++            ret = AVERROR(ENOMEM);
++            goto fail;
++        }
++        memcpy(sd->data, rpu->raw_data + 2, sd->size);
++    }
++    s->pending[slot] = metadata;
++    return 0;
++fail:
++    av_frame_free(&metadata);
++    return ret;
++}
++
++int ff_mediacodec_dovi_attach(FFMediaCodecDovi *s, AVCodecContext *avctx,
++                            AVFrame *frame)
++{
++    AVFrame *metadata = NULL;
++    int slot = -1, ret = 0;
++    if (!s->enabled)
++        return 0;
++    /* Do not let an opaque RGB conversion or 8-bit output reach gpu-next as P5. */
++    if (frame->format != AV_PIX_FMT_P010LE) {
++        av_log(avctx, AV_LOG_ERROR, "P5 hardware decode requires P010 output\n");
++        return AVERROR(ENOSYS);
++    }
++    for (int i = 0; i < FF_MEDIACODEC_DOVI_PENDING; i++) {
++        if (s->pending[i] && s->pending[i]->pts == frame->pts) {
++            slot = i;
++            break;
++        }
++    }
++    if (slot < 0) {
++        av_log(avctx, AV_LOG_ERROR, "No matching Dolby metadata for P5 hardware frame\n");
++        return AVERROR_INVALIDDATA;
++    }
++    metadata = s->pending[slot];
++    s->pending[slot] = NULL;
++    for (int i = 0; i < metadata->nb_side_data; i++) {
++        const AVFrameSideData *sd = metadata->side_data[i];
++        AVBufferRef *ref = av_buffer_ref(sd->buf);
++        if (!ref) {
++            ret = AVERROR(ENOMEM);
++            break;
++        }
++        av_frame_remove_side_data(frame, sd->type);
++        if (!av_frame_new_side_data_from_buf(frame, sd->type, ref)) {
++            av_buffer_unref(&ref);
++            ret = AVERROR(ENOMEM);
++            break;
++        }
++    }
++    av_frame_free(&metadata);
++    return ret;
++}
+--- /dev/null
++++ b/libavcodec/mediacodec_p010.h
+@@ -0,0 +1,44 @@
++/* Bounds-checked Android COLOR_FormatYUVP010 copy.
++ * SPDX-License-Identifier: LGPL-2.1-or-later
++ */
++#ifndef AVCODEC_MEDIACODEC_P010_H
++#define AVCODEC_MEDIACODEC_P010_H
++#include <stdint.h>
++#include <string.h>
++#include "libavutil/error.h"
++
++/* MediaCodec stride is in bytes, slice-height in luma rows. P010 stores ten
++ * significant bits in the high bits of each little-endian 16-bit component. */
++static inline int ff_mediacodec_copy_p010(
++    uint8_t *dst_y, int dst_y_stride, uint8_t *dst_uv, int dst_uv_stride,
++    const uint8_t *src, size_t capacity, int offset, int length,
++    int stride, int slice_height, int crop_left, int crop_top,
++    int width, int height)
++{
++    uint64_t y, uv, end, y_bytes, uv_bytes, uv_rows;
++    if (!dst_y || !dst_uv || !src || offset < 0 || length < 0 ||
++        dst_y_stride <= 0 || dst_uv_stride <= 0 ||
++        stride <= 0 || slice_height <= 0 || width <= 0 || height <= 0 ||
++        crop_left < 0 || crop_top < 0 || (crop_left & 1) || (crop_top & 1))
++        return AVERROR_INVALIDDATA;
++    y_bytes = (uint64_t)width * 2;
++    uv_bytes = ((uint64_t)width + 1) / 2 * 4;
++    uv_rows = ((uint64_t)height + 1) / 2;
++    end = (uint64_t)offset + length;
++    if (end > capacity || y_bytes > dst_y_stride || uv_bytes > dst_uv_stride ||
++        (uint64_t)crop_left * 2 + uv_bytes > stride ||
++        (uint64_t)crop_top + height > slice_height)
++        return AVERROR_INVALIDDATA;
++    y = (uint64_t)offset + (uint64_t)crop_top * stride + (uint64_t)crop_left * 2;
++    uv = (uint64_t)offset + (uint64_t)slice_height * stride +
++         (uint64_t)(crop_top / 2) * stride + (uint64_t)crop_left * 2;
++    if (y + (uint64_t)(height - 1) * stride + y_bytes > end ||
++        uv + (uv_rows - 1) * stride + uv_bytes > end)
++        return AVERROR_INVALIDDATA;
++    for (int row = 0; row < height; row++)
++        memcpy(dst_y + (size_t)row * dst_y_stride, src + y + (size_t)row * stride, y_bytes);
++    for (unsigned row = 0; row < uv_rows; row++)
++        memcpy(dst_uv + (size_t)row * dst_uv_stride, src + uv + (size_t)row * stride, uv_bytes);
++    return 0;
++}
++#endif

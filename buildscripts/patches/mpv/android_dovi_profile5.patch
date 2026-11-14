@@ -4,14 +4,14 @@
                  if (!hw_codec || strcmp(hw_codec, codec) != 0)
                      continue;
  
-+                // FFmpeg's Android MediaCodec HEVC wrapper does not export
-+                // Dolby Vision RPU metadata. Profile 5 has no compatible HDR10
-+                // base layer: decoding it as ordinary HEVC produces wrong colors.
-+                // Software HEVC preserves the RPU for gpu-next/libplacebo.
++                // P5 needs raw 10-bit components for Dolby reshaping. Android's
++                // external OES texture path already converts them to RGB. Use
++                // MediaCodec copy-back (P010 + per-frame RPU), then gpu-next.
 +                if (ctx->codec->dovi && ctx->codec->dv_profile == 5 &&
 +                    hwdec->codec->wrapper_name &&
-+                    strcmp(hwdec->codec->wrapper_name, "mediacodec") == 0) {
-+                    MP_VERBOSE(vd, "Skipping MediaCodec for Dolby Vision profile 5.\n");
++                    strcmp(hwdec->codec->wrapper_name, "mediacodec") == 0 &&
++                    !hwdec->copying) {
++                    MP_VERBOSE(vd, "P5: selecting MediaCodec P010 copy-back.\n");
 +                    continue;
 +                }
 +
