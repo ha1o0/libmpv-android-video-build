@@ -9,8 +9,8 @@ mkdir -p deps && cd deps
 # mbedtls
 [ ! -d mbedtls ] && git clone --depth 1 --branch v$v_mbedtls https://github.com/Mbed-TLS/mbedtls.git mbedtls
 
-# dav1d
-[ ! -d dav1d ] && git clone --depth 1 --branch $v_dav1d https://code.videolan.org/videolan/dav1d.git dav1d
+# dav1d (official GitHub mirror; same upstream release tag)
+[ ! -d dav1d ] && git clone --depth 1 --branch $v_dav1d https://github.com/videolan/dav1d.git dav1d
 
 # libxml2
 [ ! -d libxml2 ] && git clone --depth 1 --branch v$v_libxml2 --recursive https://gitlab.gnome.org/GNOME/libxml2.git libxml2
