@@ -16,7 +16,7 @@ REQUIRED_SYMBOLS = frozenset({
     "ff_aac_decoder",
     "ff_ass_decoder",
     "ff_ssa_decoder",
-    "ff_hdmv_pgs_subtitle_decoder",
+    "ff_pgssub_decoder",
     "ff_dvdsub_decoder",
     "ff_subrip_decoder",
     "ff_ac3_decoder",
@@ -67,7 +67,7 @@ def main():
         checked = check_audio_codecs(args.directory, args.nm)
     except (ValueError, OSError, subprocess.SubprocessError, zipfile.BadZipFile) as error:
         raise SystemExit(str(error)) from error
-    print(f"Validated Dolby/DTS and common audio codecs: {', '.join(checked)}")
+    print(f"Validated Dolby/DTS audio and ASS/PGS subtitle codecs: {', '.join(checked)}")
 
 
 if __name__ == "__main__":
