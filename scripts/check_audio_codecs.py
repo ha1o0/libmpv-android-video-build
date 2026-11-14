@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reject Android bundles missing the software audio codecs needed by mpv."""
+"""Reject Android bundles missing the audio and subtitle codecs needed by mpv."""
 
 import argparse
 from pathlib import Path
@@ -14,6 +14,11 @@ from mobile_release import ABIS, inspect_jar
 # (including the channel-based audio in DTS:X) also needs the XLL implementation.
 REQUIRED_SYMBOLS = frozenset({
     "ff_aac_decoder",
+    "ff_ass_decoder",
+    "ff_ssa_decoder",
+    "ff_hdmv_pgs_subtitle_decoder",
+    "ff_dvdsub_decoder",
+    "ff_subrip_decoder",
     "ff_ac3_decoder",
     "ff_eac3_decoder",
     "ff_flac_decoder",
@@ -48,7 +53,7 @@ def check_audio_codecs(directory, nm):
                 symbols.add(parts[0])
         missing = REQUIRED_SYMBOLS - symbols
         if missing:
-            raise ValueError(f"{abi} libmpv.so is missing required audio symbols: {', '.join(sorted(missing))}")
+            raise ValueError(f"{abi} libmpv.so is missing required audio/subtitle symbols: {', '.join(sorted(missing))}")
         checked.append(abi)
     return checked
 

@@ -135,6 +135,7 @@ cpuflags=
 	--enable-decoder=ass \
 	--enable-decoder=dvbsub \
 	--enable-decoder=dvdsub \
+	--enable-decoder=pgssub \
 	--enable-decoder=srt \
 	--enable-decoder=stl \
 	--enable-decoder=subrip \
@@ -197,6 +198,8 @@ cpuflags=
         --enable-demuxer=dtshd \
 	\
 	--enable-demuxer=ass \
+	--enable-demuxer=sup \
+	--enable-demuxer=vobsub \
 	--enable-demuxer=srt \
 	--enable-demuxer=stl \
 	--enable-demuxer=webvtt \
