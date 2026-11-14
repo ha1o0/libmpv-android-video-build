@@ -1,0 +1,31 @@
+--- a/libass/ass_fontselect.c
++++ b/libass/ass_fontselect.c
+@@ -937,6 +937,28 @@
+                 *postscript_name ? *postscript_name : "(none)");
+     }
+ 
++#ifdef __ANDROID__
++    // Android builds without fontconfig still load --sub-fonts-dir into the
++    // embedded provider. Resolve missing families and uncovered glyphs from
++    // those faces instead of returning an invisible subtitle. Exact family
++    // matches (including MKV font attachments) have already taken precedence.
++    if (!res && !default_provider) {
++        static const char *fallbacks[] = {
++            "Roboto", "Noto Sans", "Noto Sans CJK SC",
++        };
++        for (size_t i = 0; !res && i < sizeof(fallbacks) / sizeof(fallbacks[0]); i++)
++            res = select_font(priv, fallbacks[i], false, bold, italic,
++                              index, postscript_name, uid, data, code);
++        for (int i = 0; !res && i < priv->n_font; i++) {
++            ASS_FontInfo *candidate = &priv->font_infos[i];
++            if (candidate->n_family == 0 || !check_glyph(candidate, code))
++                continue;
++            res = select_font(priv, candidate->families[0], false, bold, italic,
++                              index, postscript_name, uid, data, code);
++        }
++    }
++#endif
++
+     if (res)
+         ass_msg(priv->library, MSGL_INFO,
+                 "fontselect: (%s, %d, %d) -> %s, %d, %s", family, bold,
