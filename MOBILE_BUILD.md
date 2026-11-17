@@ -20,6 +20,10 @@ used as the build input. Source archives are checked against SHA256 before use.
 
 libplacebo is built as a real static library, including its OpenGL/GLES backend,
 and linked into libmpv. Vulkan rendering stays disabled on these mobile builds.
+The Android recipe patches libplacebo's `MAIN_*` and `HOOKED_*` sampling
+aliases so Anime4K and other mpv shaders can compile with affected OpenGL ES
+drivers. See [Wplayer #12](https://github.com/rapidrabbit76/Wplayer/pull/12)
+for the original report and implementation.
 The mpv linker rejects unresolved symbols. This avoids the former header-only
 libplacebo workaround, which produced iOS binaries that crashed during loading.
 
