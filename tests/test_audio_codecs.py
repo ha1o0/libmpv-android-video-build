@@ -56,6 +56,38 @@ class AudioCodecTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "ff_truehd_decoder"):
                 codecs.check_audio_codecs(self.directory, "llvm-nm")
 
+    def test_rm_playback_and_deinterlacing_must_be_linked(self):
+        for symbol in (
+            "ff_rm_demuxer", "ff_rv10_decoder", "ff_rv20_decoder",
+            "ff_rv30_decoder", "ff_rv40_decoder", "ff_rv34_parser",
+            "ff_vc1_parser", "ff_vf_bwdif",
+        ):
+            with self.subTest(symbol=symbol):
+                result = self.nm_result(missing=(symbol,))
+                with patch("check_audio_codecs.subprocess.run", return_value=result):
+                    with self.assertRaisesRegex(ValueError, symbol):
+                        codecs.check_audio_codecs(self.directory, "llvm-nm")
+
+    def test_realaudio_parser_without_decoder_is_rejected(self):
+        # RM can still expose the track when only its parser is linked.
+        for symbol in ("ff_cook_decoder", "ff_sipr_decoder"):
+            with self.subTest(symbol=symbol):
+                result = self.nm_result(missing=(symbol,))
+                with patch("check_audio_codecs.subprocess.run", return_value=result):
+                    with self.assertRaisesRegex(ValueError, symbol):
+                        codecs.check_audio_codecs(self.directory, "llvm-nm")
+
+    def test_realaudio_family_and_parsers_remain_required(self):
+        for symbol in (
+            "ff_cook_parser", "ff_sipr_parser", "ff_ra_144_decoder",
+            "ff_ra_288_decoder", "ff_ralf_decoder", "ff_atrac3_decoder",
+        ):
+            with self.subTest(symbol=symbol):
+                result = self.nm_result(missing=(symbol,))
+                with patch("check_audio_codecs.subprocess.run", return_value=result):
+                    with self.assertRaisesRegex(ValueError, symbol):
+                        codecs.check_audio_codecs(self.directory, "llvm-nm")
+
 
 if __name__ == "__main__":
     unittest.main()

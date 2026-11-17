@@ -84,7 +84,7 @@ jobs:
               tail = '\n'.join(path.read_text(errors='replace').splitlines()[-25:])[-3500:]
               print('::error title=Native compiler output::' + tail.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A'))
           PYTHON
-      - name: Require Dolby and DTS codecs in all four ABI libraries
+      - name: Verify playback codecs and filters in all four ABI libraries
         run: |
           . buildscripts/include/depinfo.sh
           python3 scripts/check_audio_codecs.py buildscripts/artifacts/default \

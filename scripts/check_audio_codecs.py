@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reject Android bundles missing the audio and subtitle codecs needed by mpv."""
+"""Reject Android bundles missing container, codec, or filter support needed by mpv."""
 
 import argparse
 from pathlib import Path
@@ -12,6 +12,7 @@ from mobile_release import ABIS, inspect_jar
 
 # Check the linked, stripped library rather than configure flags. DTS-HD MA
 # (including the channel-based audio in DTS:X) also needs the XLL implementation.
+# RM track discovery and the ra* wildcard do not imply Cook/Sipro decoding.
 REQUIRED_SYMBOLS = frozenset({
     "ff_aac_decoder",
     "ff_hevc_mediacodec_decoder",
@@ -26,6 +27,22 @@ REQUIRED_SYMBOLS = frozenset({
     "ff_eac3_decoder",
     "ff_flac_decoder",
     "ff_opus_decoder",
+    "ff_rm_demuxer",
+    "ff_rv10_decoder",
+    "ff_rv20_decoder",
+    "ff_rv30_decoder",
+    "ff_rv40_decoder",
+    "ff_rv34_parser",
+    "ff_vc1_parser",
+    "ff_vf_bwdif",
+    "ff_cook_decoder",
+    "ff_cook_parser",
+    "ff_sipr_decoder",
+    "ff_sipr_parser",
+    "ff_ra_144_decoder",
+    "ff_ra_288_decoder",
+    "ff_ralf_decoder",
+    "ff_atrac3_decoder",
     "ff_mlp_decoder",
     "ff_truehd_decoder",
     "ff_mlp_parser",
@@ -56,7 +73,7 @@ def check_audio_codecs(directory, nm):
                 symbols.add(parts[0])
         missing = REQUIRED_SYMBOLS - symbols
         if missing:
-            raise ValueError(f"{abi} libmpv.so is missing required audio/subtitle symbols: {', '.join(sorted(missing))}")
+            raise ValueError(f"{abi} libmpv.so is missing required playback symbols: {', '.join(sorted(missing))}")
         checked.append(abi)
     return checked
 
@@ -70,7 +87,7 @@ def main():
         checked = check_audio_codecs(args.directory, args.nm)
     except (ValueError, OSError, subprocess.SubprocessError, zipfile.BadZipFile) as error:
         raise SystemExit(str(error)) from error
-    print(f"Validated Dolby/DTS audio and ASS/PGS subtitle codecs: {', '.join(checked)}")
+    print(f"Validated RM/RealMedia, bwdif, Dolby/DTS and ASS/PGS: {', '.join(checked)}")
 
 
 if __name__ == "__main__":

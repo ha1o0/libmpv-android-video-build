@@ -1,0 +1,23 @@
+--- a/library/aesce.c
++++ b/library/aesce.c
+@@ -48,6 +48,11 @@
+ 
+ #if defined(MBEDTLS_HAVE_ARM64)
+ 
++/* Keep the compiler header outside our function-target pragma. Clang 19
++ * gives some intrinsics their own target attributes; applying crypto to
++ * their callees makes those inline definitions incompatible. */
++#include <arm_neon.h>
++
+ #if !defined(__ARM_FEATURE_AES) || defined(MBEDTLS_ENABLE_ARM_CRYPTO_EXTENSIONS_COMPILER_FLAG)
+ #   if defined(__clang__)
+ #       if __clang_major__ < 4
+@@ -67,8 +72,6 @@
+ #   endif
+ #endif /* !__ARM_FEATURE_AES || MBEDTLS_ENABLE_ARM_CRYPTO_EXTENSIONS_COMPILER_FLAG */
+ 
+-#include <arm_neon.h>
+-
+ #if defined(__linux__)
+ #include <asm/hwcap.h>
+ #include <sys/auxv.h>
