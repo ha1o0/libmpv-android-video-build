@@ -1,0 +1,20 @@
+--- a/video/decode/vd_lavc.c
++++ b/video/decode/vd_lavc.c
+@@ -560,13 +560,14 @@
+                 if (!hw_codec || strcmp(hw_codec, codec) != 0)
+                     continue;
+
+-                // P5 needs raw 10-bit components for Dolby reshaping. Android's
++                // P5/P8 need raw 10-bit components for Dolby reshaping. Android's
+                 // external OES texture path already converts them to RGB. Use
+                 // MediaCodec copy-back (P010 + per-frame RPU), then gpu-next.
+-                if (ctx->codec->dovi && ctx->codec->dv_profile == 5 &&
++                if (ctx->codec->dovi &&
++                    (ctx->codec->dv_profile == 5 || ctx->codec->dv_profile == 8) &&
+                     hwdec->codec->wrapper_name &&
+                     strcmp(hwdec->codec->wrapper_name, "mediacodec") == 0 &&
+                     !hwdec->copying) {
+-                    MP_VERBOSE(vd, "P5: selecting MediaCodec P010 copy-back.\n");
++                    MP_VERBOSE(vd, "Dolby Vision: selecting MediaCodec P010 copy-back.\n");
+                     continue;
+                 }

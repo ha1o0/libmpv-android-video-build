@@ -18,7 +18,9 @@ if os.environ.get('DOVI_SMOKE_ARCHIVE'):
 fetch(source, Path(sys.argv[2]) / 'ffmpeg')
 PY
 cd "$dovi_scratch/ffmpeg"
+python3 "$dovi_root/tests/test_mpegts_wrapped_webp.py" --ffmpeg-source "$dovi_scratch/ffmpeg"
 patch --batch --forward -p1 < "$dovi_root/buildscripts/patches/ffmpeg/mediacodec_dovi_p010.patch"
+patch --batch --forward -p1 < "$dovi_root/buildscripts/patches/ffmpeg/mediacodec_dovi_profile8.patch"
 mkdir "$dovi_scratch/host"
 cd "$dovi_scratch/host"
 ../ffmpeg/configure --cc="$dovi_cc" \

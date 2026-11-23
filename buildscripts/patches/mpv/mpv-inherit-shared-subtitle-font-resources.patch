@@ -1,0 +1,50 @@
+From: Floe contributors <recipe@example.invalid>
+Subject: [PATCH] sub: inherit shared font resources for independent secondary styling
+
+fonts_dir and font_provider are global subtitle resource options; independent
+secondary style exposes only appearance settings. When ASS objects rebuild
+for independent style, inherit these two resource fields from primary options
+while retaining the chosen secondary font family, size, colors and effects.
+This keeps exported/custom fonts available to both subtitle slots.
+
+---
+diff --git a/sub/sd_ass.c b/sub/sd_ass.c
+--- a/sub/sd_ass.c
++++ b/sub/sd_ass.c
+@@ -123,6 +123,16 @@
+     return independent_style(sd) ? sd->opts->secondary_sub_style : sd->opts->sub_style;
+ }
+ 
++static struct osd_style_opts subtitle_font_options(struct sd *sd)
++{
++    struct osd_style_opts fonts = *subtitle_style(sd);
++    // The directory and provider are shared resource options. Keep the
++    // selected subtitle's font family and other independent styling intact.
++    fonts.fonts_dir = sd->opts->sub_style->fonts_dir;
++    fonts.font_provider = sd->opts->sub_style->font_provider;
++    return fonts;
++}
++
+ static char **subtitle_style_overrides(struct sd *sd)
+ {
+     return independent_style(sd) ? sd->opts->secondary_ass_style_override_list
+@@ -259,7 +269,8 @@
+     } else {
+         ctx->ass_renderer = ass_renderer_init(ctx->ass_library);
+ 
+-        mp_ass_configure_fonts(ctx->ass_renderer, subtitle_style(sd),
++        struct osd_style_opts fonts = subtitle_font_options(sd);
++        mp_ass_configure_fonts(ctx->ass_renderer, &fonts,
+                                sd->global, sd->log);
+     }
+ }
+@@ -270,7 +281,8 @@
+     struct mp_subtitle_opts *opts = sd->opts;
+     struct mp_subtitle_shared_opts *shared_opts = sd->shared_opts;
+ 
+-    ctx->ass_library = mp_ass_init(sd->global, subtitle_style(sd), sd->log);
++    struct osd_style_opts fonts = subtitle_font_options(sd);
++    ctx->ass_library = mp_ass_init(sd->global, &fonts, sd->log);
+     ass_set_extract_fonts(ctx->ass_library, opts->use_embedded_fonts);
+ 
+     add_subtitle_fonts(sd);

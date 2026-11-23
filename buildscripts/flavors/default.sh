@@ -39,6 +39,7 @@ cpuflags=
 	--pkg-config-flags=--static \
 	\
 	--disable-muxers \
+	--enable-muxer=nut \
 	--disable-decoders \
 	--disable-encoders \
 	--disable-demuxers \
@@ -153,6 +154,7 @@ cpuflags=
 	--enable-decoder=movtext \
 	\
 	--enable-demuxer=concat \
+	--enable-demuxer=nut \
 	--enable-demuxer=data \
 	--enable-demuxer=flv \
 	--enable-demuxer=hls \

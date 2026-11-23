@@ -8,6 +8,7 @@
 #include "libavcodec/mediacodec_dovi.h"
 #include "libavcodec/mediacodec_p010.h"
 #include "fixtures/dovi_p5_rpu.h"
+#include "fixtures/dovi_p8_rpu.h"
 
 static AVCodecContext *context(int profile)
 {
@@ -115,7 +116,7 @@ static void metadata_tests(void)
     puts("PASS: ambiguous/missing timestamps, unsupported output and bounded queue fail safely");
 
     memset(&dovi, 0, sizeof(dovi));
-    ctx = context(8);
+    ctx = context(7);
     ff_mediacodec_dovi_init(&dovi, ctx);
     assert(!dovi.enabled);
     pkt = av_packet_alloc();
@@ -127,6 +128,38 @@ static void metadata_tests(void)
     ff_mediacodec_dovi_close(&dovi);
     avcodec_free_context(&ctx);
     puts("PASS: other Dolby profiles and ordinary decoder output are untouched");
+}
+
+static void profile8_tests(void)
+{
+    const unsigned char *samples[] = {rpu_p8, rpu_p84};
+    const int sizes[] = {sizeof(rpu_p8), sizeof(rpu_p84)};
+    for (int sample = 0; sample < 2; sample++) {
+        FFMediaCodecDovi dovi = {0};
+        AVCodecContext *ctx = context(8);
+        ff_mediacodec_dovi_init(&dovi, ctx);
+        assert(dovi.enabled);
+        submit(&dovi, ctx, samples[sample], sizes[sample], 9000);
+        submit(&dovi, ctx, samples[sample], sizes[sample], 3000);
+        receive(&dovi, ctx, samples[sample], sizes[sample], 3000);
+        receive(&dovi, ctx, samples[sample], sizes[sample], 9000);
+        submit(&dovi, ctx, samples[sample], sizes[sample], 1000);
+        ff_mediacodec_dovi_flush(&dovi);
+        submit(&dovi, ctx, samples[sample], sizes[sample], 1000);
+        receive(&dovi, ctx, samples[sample], sizes[sample], 1000);
+        ff_mediacodec_dovi_close(&dovi);
+        avcodec_free_context(&ctx);
+    }
+    puts("PASS: real P8.1/P8.4 RPU survives display reordering and seek/flush");
+
+    FFMediaCodecDovi dovi = {0};
+    AVCodecContext *ctx = context(8);
+    ((AVDOVIDecoderConfigurationRecord *)ctx->coded_side_data[0].data)->rpu_present_flag = 0;
+    ff_mediacodec_dovi_init(&dovi, ctx);
+    assert(!dovi.enabled);
+    ff_mediacodec_dovi_close(&dovi);
+    avcodec_free_context(&ctx);
+    puts("PASS: a Dolby-tagged base layer without RPU retains ordinary decoding");
 }
 
 static void p010_tests(void)
@@ -151,4 +184,4 @@ static void p010_tests(void)
     puts("PASS: invalid P010 layouts and arithmetic boundaries are rejected");
 }
 
-int main(void) { metadata_tests(); p010_tests(); return 0; }
+int main(void) { metadata_tests(); profile8_tests(); p010_tests(); return 0; }

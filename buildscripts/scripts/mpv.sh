@@ -16,11 +16,19 @@ fi
 
 unset CC CXX # meson wants these unset
 
-meson setup $build --cross-file "$prefix_dir"/crossfile.txt \
+# The cross-file's static dependency default must not replace libmpv's shared
+# output when an existing local build is reconfigured after a dependency update.
+reconfigure=()
+if [ -d "$build/meson-private" ]; then
+    reconfigure=(--reconfigure)
+fi
+
+meson setup $build "${reconfigure[@]}" --cross-file "$prefix_dir"/crossfile.txt \
     --prefer-static \
     --default-library shared \
     -Db_lundef=true \
     -Dauto_features=disabled \
+    -Dlibcurl=enabled \
     -Dgl=enabled -Degl-android=enabled -Dplain-gl=enabled \
     -Dandroid-media-ndk=enabled -Daudiotrack=enabled -Dopensles=enabled \
     -Dvector=enabled -Dzlib=enabled \

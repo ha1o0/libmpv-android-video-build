@@ -1,0 +1,12 @@
+--- a/libavcodec/mediacodec_dovi.c
++++ b/libavcodec/mediacodec_dovi.c
+@@ -15,7 +15,8 @@
+     sd = ff_get_coded_side_data(avctx, AV_PKT_DATA_DOVI_CONF);
+     if (sd && sd->size >= sizeof(s->parser.cfg)) {
+         s->parser.cfg = *(const AVDOVIDecoderConfigurationRecord *)sd->data;
+-        s->enabled = s->parser.cfg.dv_profile == 5;
++        s->enabled = s->parser.cfg.rpu_present_flag &&
++            (s->parser.cfg.dv_profile == 5 || s->parser.cfg.dv_profile == 8);
+     }
+ }
+

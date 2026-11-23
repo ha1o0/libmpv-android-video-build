@@ -1,0 +1,84 @@
+From: Floe contributors <recipe@example.invalid>
+Subject: [PATCH] gpu-next: preserve frame color and Dolby base decisions in playback and screenshots
+
+Resolve color/RPU decisions consistently for both paths. The CPU uploader
+initializes a frame from the original image, so restore resolved color and
+representation after upload while retaining its exact storage bit encoding.
+Invalid residual/enhancement-layer RPU stays disabled. Valid P5/P8 metadata
+and the hardware mapping path retain their existing behavior.
+
+--- a/video/out/gpu_next/video.c
++++ b/video/out/gpu_next/video.c
+@@ -155,6 +155,26 @@
+     });
+ }
+ 
++// Use the same color/RPU decision for playback and screenshots. mpv does
++// not decode Dolby residual/enhancement layers, so those frames use the base.
++static void resolve_frame_color_params(struct mp_image *mpi,
++                                      struct mp_image_params *par)
++{
++    if (dovi_requires_base_layer_fallback(mpi))
++        restore_dovi_base_layer_params(mpi, par);
++    mp_image_params_guess_csp(par);
++}
++
++static void apply_uploaded_frame_color(struct pl_frame *frame,
++                                       const struct mp_image_params *par)
++{
++    // Color metadata is resolved above; storage bits come from the uploader.
++    struct pl_bit_encoding bits = frame->repr.bits;
++    frame->color = par->color;
++    frame->repr = par->repr;
++    frame->repr.bits = bits;
++}
++
+ static bool describe_frame_planes(struct pl_frame *frame, int imgfmt)
+ {
+     struct mp_imgfmt_desc desc = mp_imgfmt_get_desc(imgfmt);
+@@ -300,12 +320,7 @@
+         par = p->hwdec_mapper->dst_params;
+     }
+ 
+-    // mpv does not decode DV residual/enhancement layers, so render the base
+-    // layer and ignore DV RPU-derived dynamic metadata for these frames.
+-    if (dovi_requires_base_layer_fallback(mpi))
+-        restore_dovi_base_layer_params(mpi, &par);
+-
+-    mp_image_params_guess_csp(&par);
++    resolve_frame_color_params(mpi, &par);
+ 
+     *frame = (struct pl_frame) {
+         .color = par.color,
+@@ -329,9 +344,12 @@
+             talloc_free(mpi);
+             return false;
+         }
+-    } else if (!ra_upload_mp_image(p->ra, frame, mpi)) {
+-        talloc_free(mpi);
+-        return false;
++    } else {
++        if (!ra_upload_mp_image(p->ra, frame, mpi)) {
++            talloc_free(mpi);
++            return false;
++        }
++        apply_uploaded_frame_color(frame, &par);
+     }
+ 
+     frame->profile = (struct pl_icc_profile) {
+@@ -855,11 +873,15 @@
+     struct pl_frame source_frame = {0};
+     pl_tex fbo = NULL;
+ 
++    struct mp_image_params par = frame->current->params;
++    resolve_frame_color_params(frame->current, &par);
++
+     // Upload the mp_image to a pl_frame via the RA helper.
+     if (!ra_upload_mp_image(p->ra, &source_frame, frame->current)) {
+         mp_msg(p->log, MSGL_ERR, "pl_video_screenshot: failed to upload source image\n");
+         return NULL;
+     }
++    apply_uploaded_frame_color(&source_frame, &par);
+ 
+     // Find an 8-bit RGBA renderable + host-readable format.
+     pl_fmt fbo_fmt = ra_next_find_fmt(p->ra, PL_FMT_UNORM, 4, 8, 8,

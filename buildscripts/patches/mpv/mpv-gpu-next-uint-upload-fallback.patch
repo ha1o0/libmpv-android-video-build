@@ -1,0 +1,83 @@
+From: Floe contributors <recipe@example.invalid>
+Subject: [PATCH] gpu-next: use integer textures when normalized uploads are unavailable
+
+GLES 3 can expose UINT16 while omitting GL_EXT_texture_norm16. Query each CPU
+plane, prefer its original normalized/float format, and only use UINT when
+normalized storage is unavailable. libplacebo normalizes integer samples
+without reducing bit depth or dropping Dolby metadata. Keep hardware mapping
+negotiation separate from CPU uploads.
+
+--- a/video/out/gpu_next/ra.c
++++ b/video/out/gpu_next/ra.c
+@@ -285,6 +285,35 @@
+     return desc.num_planes;
+ }
+ 
++// Prefer the original normalized/float upload. GLES 3 can lack UNORM16
++// textures while still providing UINT16; libplacebo normalizes integer samples
++// without reducing the original sample/color depth or Dolby reshaping metadata.
++static int gpu_plane_data(struct ra_next *ra, struct pl_plane_data data[4],
++                          struct pl_bit_encoding *bits, enum mp_imgfmt imgfmt)
++{
++    int planes = plane_data_from_imgfmt(data, bits, imgfmt, false);
++    if (!planes)
++        return 0;
++
++    for (int n = 0; n < planes; n++) {
++        if (pl_plane_find_fmt(ra->gpu, NULL, &data[n]))
++            continue;
++        if (data[n].type != PL_FMT_UNORM)
++            return 0;
++        data[n].type = PL_FMT_UINT;
++        if (!pl_plane_find_fmt(ra->gpu, NULL, &data[n]))
++            return 0;
++    }
++    return planes;
++}
++
++bool ra_next_check_imgfmt(struct ra_next *ra, int imgfmt)
++{
++    struct pl_plane_data data[4] = {0};
++    struct pl_bit_encoding bits = {0};
++    return gpu_plane_data(ra, data, &bits, imgfmt) > 0;
++}
++
+ /**
+  * Uploads an `mp_image` to a `pl_frame`.
+  * @param ra The rendering abstraction context.
+@@ -307,7 +336,7 @@
+ 
+     // Convert the mpv format to libplacebo's plane data description.
+     struct pl_plane_data data[4] = {0};
+-    int planes = plane_data_from_imgfmt(data, &out_frame->repr.bits, img->imgfmt, false);
++    int planes = gpu_plane_data(ra, data, &out_frame->repr.bits, img->imgfmt);
+     if (!planes) {
+         mp_msg(ra->log, MSGL_ERR, "Failed to describe image format '%s'\n",
+                mp_imgfmt_to_name(img->imgfmt));
+--- a/video/out/gpu_next/ra.h
++++ b/video/out/gpu_next/ra.h
+@@ -20,6 +20,9 @@
+     struct mpv_global *global;
+     struct mp_log *log;
+ };
++
++/* Check the actual GPU upload formats for a CPU image. */
++bool ra_next_check_imgfmt(struct ra_next *ra, int imgfmt);
+ 
+ /* Upload an mp_image into a pl_frame suitable for pl_render_image.
+  * Caller must call ra_cleanup_pl_frame() to free any textures created.
+--- a/video/out/gpu_next/video.c
++++ b/video/out/gpu_next/video.c
+@@ -1023,7 +1023,8 @@
+  * @return True if the format is likely supported, false otherwise.
+  */
+ bool pl_video_check_format(struct pl_video *p, int imgfmt) {
+-    // For simplicity, we assume libplacebo can handle it.
+-    // A more robust implementation might query libplacebo's capabilities.
+-    return true;
+-}
++    // Hardware textures use their existing mapper rather than CPU uploads.
++    if (p->hwdec_ctx.ra_ctx && ra_hwdec_get(&p->hwdec_ctx, imgfmt))
++        return true;
++    return ra_next_check_imgfmt(p->ra, imgfmt);
++}

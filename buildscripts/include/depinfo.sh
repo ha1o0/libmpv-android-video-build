@@ -23,6 +23,8 @@ v_libvpx=1.13
 # I would've used a dict but putting arrays in a dict is not a thing
 
 dep_libplacebo=()
+dep_nghttp2=()
+dep_curl=(mbedtls nghttp2)
 dep_mbedtls=()
 dep_dav1d=()
 dep_libvorbis=(libogg)
@@ -38,7 +40,7 @@ dep_libass=(freetype fribidi harfbuzz)
 dep_lua=()
 dep_shaderc=()
 if [ -n "${ENCODERS_GPL+x}" ]; then
-	dep_mpv=(ffmpeg libass libplacebo fftools_ffi)
+	dep_mpv=(ffmpeg libass libplacebo curl fftools_ffi)
 else
-	dep_mpv=(ffmpeg libass libplacebo)
+	dep_mpv=(ffmpeg libass libplacebo curl)
 fi

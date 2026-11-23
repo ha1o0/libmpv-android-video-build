@@ -43,6 +43,7 @@ cpuflags=
 	--enable-parsers \
 	\
 	--disable-muxers \
+	--enable-muxer=nut \
 	--disable-encoders \
 	--disable-protocols \
 	--disable-devices \
