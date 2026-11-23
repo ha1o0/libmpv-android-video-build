@@ -37,3 +37,40 @@ or dispatch the workflow from this recipe to build the verified jars elsewhere.
 The app consumer is `scripts/mobile_libmpv.py` in bota. Only integrate a published,
 verified release; it updates the media-kit mobile package versions/checksums and
 then the app submodule lock. CI artifacts alone are not a production dependency.
+
+## Android native HDR output
+
+`buildscripts/patches/mpv/android_hdr_surface.patch` adds an opt-in
+`android-hdr-capabilities` bitmask (HDR10/PQ = 1, HLG = 2). Only a consumer-owned
+native SurfaceView may set it, after querying the current Display. Flutter
+SurfaceProducer textures must pass zero. The consumer also probes this option
+before enabling the native path, so older published JARs remain SDR.
+
+The EGL backend selects RGB10_A2 where available, tags accepted surfaces with
+BT.2020 PQ/HLG, forwards HDR10 static metadata, and reports the accepted target
+to gpu-next. Unsupported formats/extensions or an EGL colorspace rejection
+restore SDR. Switching colorspace retains the GLES context and subtitle atlases.
+`gpu-next` still composites ASS, bitmap and secondary subtitles. This does not
+use `mediacodec_embed` and does not add a second subtitle renderer.
+
+Source-matched HDR output retains source luminance; stored SDR tone-mapping
+algorithms remain available for SDR fallback. Ordinary SDR sources should keep
+their existing texture path. `demux-gamma` and `demux-primaries` in `track-list`
+allow the consumer to select the surface and preserve raw HDR decoder transport
+before decoding. This is HDR10/HLG output, not a Dolby Vision output contract.
+
+If container color fields are absent, the Android demux thread supplements this
+selection hint from FFmpeg codec parameters and HEVC CodecPrivate (SPS/VUI).
+The header probe runs once, without decoding a frame, and is cached separately
+from the real decoder's metadata. Explicit container fields take precedence;
+missing or malformed headers remain unknown. This covers older MKV remuxes
+without a Matroska Colour element, including the verified BT.2020/PQ sample.
+
+Run `PYTHONPATH=tests python3 -m unittest discover -s tests -p 'test_*.py'`.
+The negotiation tests execute the patched production C functions with driver
+rejection, capability/depth combinations, metadata and HDR/SDR transitions.
+A successful build is not an HDR display or subtitle visual acceptance test.
+
+Android playback controls now use opaque backgrounds for phone/TV performance.
+The consumer does not send blur geometry, and the native renderer contains no
+post-processing blur pass or blur-related GL dispatch additions.
