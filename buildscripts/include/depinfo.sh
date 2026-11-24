@@ -11,7 +11,7 @@ v_harfbuzz=7.2.0
 v_fribidi=1.0.12
 v_freetype=2-13-0
 v_mbedtls=3.4.0
-v_dav1d=1.2.0
+v_dav1d=1.5.4
 v_libxml2=2.10.3
 # mpv / FFmpeg / libplacebo versions and archive hashes live in mobile-sources.json.
 v_libogg=1.3.5

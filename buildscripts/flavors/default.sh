@@ -65,7 +65,6 @@ cpuflags=
 	--disable-videotoolbox \
 	--disable-audiotoolbox \
 	\
-	--enable-small \
 	--enable-hwaccels \
 	--enable-optimizations \
 	--enable-runtime-cpudetect \
@@ -165,6 +164,7 @@ cpuflags=
 	--enable-demuxer=mov \
 	--enable-demuxer=mpegps \
 	--enable-demuxer=mpegts \
+	--enable-demuxer=mxf \
 	--enable-demuxer=mpegvideo \
 	--enable-demuxer=hevc \
 	--enable-demuxer=rtsp \

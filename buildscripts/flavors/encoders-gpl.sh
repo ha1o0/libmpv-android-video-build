@@ -68,7 +68,6 @@ cpuflags=
 	--disable-videotoolbox \
 	--disable-audiotoolbox \
 	\
-	--enable-small \
 	--enable-hwaccels \
 	--enable-optimizations \
 	--enable-runtime-cpudetect \
