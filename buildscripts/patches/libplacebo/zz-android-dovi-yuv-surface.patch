@@ -1,0 +1,102 @@
+--- a/src/include/libplacebo/gpu.h
++++ b/src/include/libplacebo/gpu.h
+@@ -735,6 +735,7 @@
+     PL_SAMPLER_NORMAL,      // gsampler2D, gsampler3D etc.
+     PL_SAMPLER_RECT,        // gsampler2DRect
+     PL_SAMPLER_EXTERNAL,    // gsamplerExternalOES
++    PL_SAMPLER_EXTERNAL_YUV, // __samplerExternal2DY2YEXT (raw normalized YUV)
+     PL_SAMPLER_TYPE_COUNT,
+ };
+ 
+--- a/src/include/libplacebo/opengl.h
++++ b/src/include/libplacebo/opengl.h
+@@ -201,6 +201,9 @@
+ 
+     // The texture's GLint sized internal format (e.g. GL_RGBA16F). Required.
+     int iformat;
++
++    // Requires GL_EXT_YUV_target. Preserve YUV components before Dolby reshaping.
++    bool external_yuv;
+ };
+ 
+ #define pl_opengl_wrap_params(...) (&(struct pl_opengl_wrap_params) { __VA_ARGS__ })
+--- a/src/opengl/gpu_tex.c
++++ b/src/opengl/gpu_tex.c
+@@ -673,7 +673,12 @@
+             break;
+ 
+         case GL_TEXTURE_RECTANGLE: tex->sampler_type = PL_SAMPLER_RECT; break;
+-        case GL_TEXTURE_EXTERNAL_OES: tex->sampler_type = PL_SAMPLER_EXTERNAL; break;
++        case GL_TEXTURE_EXTERNAL_OES:
++            if (params->external_yuv && !pl_opengl_has_ext(p->gl, "GL_EXT_YUV_target"))
++                goto error;
++            tex->sampler_type = params->external_yuv ? PL_SAMPLER_EXTERNAL_YUV
++                                                    : PL_SAMPLER_EXTERNAL;
++            break;
+ 
+         default:
+             PL_ERR(gpu, "Failed mapping texture target %u to any equivalent "
+@@ -686,6 +691,7 @@
+     bool can_fbo = tex_gl->texture &&
+                    (fmt->caps & PL_FMT_CAP_RENDERABLE) &&
+                    tex->sampler_type != PL_SAMPLER_EXTERNAL &&
++                   tex->sampler_type != PL_SAMPLER_EXTERNAL_YUV &&
+                    dims < 3;
+ 
+     if (can_fbo && !tex_gl->fbo) {
+--- a/src/shaders.c
++++ b/src/shaders.c
+@@ -642,6 +642,7 @@
+     [PL_SAMPLER_NORMAL]     = "sampler2D",
+     [PL_SAMPLER_RECT]       = "sampler2DRect",
+     [PL_SAMPLER_EXTERNAL]   = "samplerExternalOES",
++    [PL_SAMPLER_EXTERNAL_YUV] = "__samplerExternal2DY2YEXT",
+ };
+ 
+ ident_t sh_subpass(pl_shader sh, pl_shader sub)
+--- a/src/dispatch.c
++++ b/src/dispatch.c
+@@ -323,7 +323,7 @@
+ 
+     // Enable all extensions needed for different types of input
+     bool has_ssbo = false, has_ubo = false, has_img = false, has_texel = false,
+-         has_ext = false, has_nofmt = false, has_gather = false;
++         has_ext = false, has_yuv = false, has_nofmt = false, has_gather = false;
+     for (int i = 0; i < sh->descs.num; i++) {
+         switch (sh->descs.elem[i].desc.type) {
+         case PL_DESC_BUF_UNIFORM: has_ubo = true; break;
+@@ -348,6 +348,7 @@
+             case PL_SAMPLER_NORMAL: break;
+             case PL_SAMPLER_RECT: break;
+             case PL_SAMPLER_EXTERNAL: has_ext = true; break;
++            case PL_SAMPLER_EXTERNAL_YUV: has_yuv = true; break;
+             case PL_SAMPLER_TYPE_COUNT: pl_unreachable();
+             }
+             break;
+@@ -374,6 +375,8 @@
+             ADD(pre, "#extension GL_OES_EGL_image_external : enable\n");
+         }
+     }
++    if (has_yuv)
++        ADD(pre, "#extension GL_EXT_YUV_target : require\n");
+     if (has_nofmt)
+         ADD(pre, "#extension GL_EXT_shader_image_load_formatted : enable\n");
+     if (has_gather && !gpu->glsl.gles)
+@@ -386,6 +389,9 @@
+                  "#else                             \n"
+                  "precision mediump float;          \n"
+                  "#endif                            \n");
++
++        if (has_yuv)
++            ADD(pre, "precision highp __samplerExternal2DY2YEXT; \n");
+ 
+         // Always use 16-bit precision for samplers
+         ADD(pre, "precision mediump sampler2D; \n");
+@@ -467,6 +473,7 @@
+                 [PL_SAMPLER_NORMAL][3]  = "sampler3D",
+                 [PL_SAMPLER_RECT][2]    = "sampler2DRect",
+                 [PL_SAMPLER_EXTERNAL][2] = "samplerExternalOES",
++                [PL_SAMPLER_EXTERNAL_YUV][2] = "__samplerExternal2DY2YEXT",
+             };
+ 
+             pl_tex tex = sd->binding.object;

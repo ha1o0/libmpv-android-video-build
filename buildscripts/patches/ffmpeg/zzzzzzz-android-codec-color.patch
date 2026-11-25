@@ -1,0 +1,74 @@
+--- a/libavcodec/mediacodecdec.c
++++ b/libavcodec/mediacodecdec.c
+@@ -30,6 +30,7 @@
+ #include "libavutil/mem.h"
+ #include "libavutil/opt.h"
+ #include "libavutil/intreadwrite.h"
++#include "libavutil/mastering_display_metadata.h"
+ #include "libavutil/pixfmt.h"
+ #include "libavutil/internal.h"
+ 
+@@ -316,6 +317,55 @@
+ }
+ #endif
+ 
++/* MediaCodec cannot recover container-only HDR metadata from VP9 packets.
++ * Set the declared input colorimetry before configure, so the decoder tags its
++ * Surface buffers correctly. Unknown fields remain unspecified. */
++static void mediacodec_set_input_color(AVCodecContext *avctx, FFAMediaFormat *format)
++{
++    int range = ff_AMediaFormatColorRange_from_AVColorRange(avctx->color_range);
++    int standard = ff_AMediaFormatColorStandard_from_AVColorSpace(avctx->colorspace);
++    int transfer = ff_AMediaFormatColorTransfer_from_AVColorTransfer(avctx->color_trc);
++    if (range != COLOR_RANGE_UNSPECIFIED)
++        ff_AMediaFormat_setInt32(format, "color-range", range);
++    if (standard != COLOR_STANDARD_UNSPECIFIED)
++        ff_AMediaFormat_setInt32(format, "color-standard", standard);
++    if (transfer != COLOR_TRANSFER_UNSPECIFIED)
++        ff_AMediaFormat_setInt32(format, "color-transfer", transfer);
++
++    const AVPacketSideData *sd = ff_get_coded_side_data(avctx,
++        AV_PKT_DATA_MASTERING_DISPLAY_METADATA);
++    const AVMasteringDisplayMetadata *md = sd && sd->size >= sizeof(*md)
++        ? (const void *)sd->data : NULL;
++    sd = ff_get_coded_side_data(avctx, AV_PKT_DATA_CONTENT_LIGHT_LEVEL);
++    const AVContentLightMetadata *cl = sd && sd->size >= sizeof(*cl)
++        ? (const void *)sd->data : NULL;
++    if (transfer != COLOR_TRANSFER_ST2084 || (!md && !cl)) return;
++
++    /* Android MediaFormat KEY_HDR_STATIC_INFO: descriptor ID 0 followed by
++     * twelve little-endian uint16 fields (R/G/B, white, luminance, CLL/FALL). */
++    uint8_t info[25] = {0};
++    double values[12] = {0};
++    if (md && md->has_primaries) {
++        for (int i = 0; i < 3; i++)
++            for (int j = 0; j < 2; j++)
++                values[2*i+j] = av_q2d(md->display_primaries[i][j]) * 50000;
++        values[6] = av_q2d(md->white_point[0]) * 50000;
++        values[7] = av_q2d(md->white_point[1]) * 50000;
++    }
++    if (md && md->has_luminance) {
++        values[8] = av_q2d(md->max_luminance);
++        values[9] = av_q2d(md->min_luminance) * 10000;
++    }
++    if (cl) { values[10] = cl->MaxCLL; values[11] = cl->MaxFALL; }
++    for (int i = 0; i < 12; i++) {
++        double value = values[i];
++        unsigned n = !isfinite(value) || value <= 0 ? 0 :
++                     value >= UINT16_MAX ? UINT16_MAX : (unsigned)lrint(value);
++        AV_WL16(info + 1 + 2*i, n);
++    }
++    ff_AMediaFormat_setBuffer(format, "hdr-static-info", info, sizeof(info));
++}
++
+ static av_cold int mediacodec_decode_init(AVCodecContext *avctx)
+ {
+     int ret;
+@@ -475,6 +525,7 @@
+     if (avctx->codec_type == AVMEDIA_TYPE_VIDEO) {
+         ff_AMediaFormat_setInt32(format, "width", avctx->width);
+         ff_AMediaFormat_setInt32(format, "height", avctx->height);
++        mediacodec_set_input_color(avctx, format);
+     } else {
+         ff_AMediaFormat_setInt32(format, "channel-count", avctx->ch_layout.nb_channels);
+         ff_AMediaFormat_setInt32(format, "sample-rate", avctx->sample_rate);

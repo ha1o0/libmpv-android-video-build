@@ -1,0 +1,44 @@
+--- a/video/out/vo_mediacodec_embed.c
++++ b/video/out/vo_mediacodec_embed.c
+@@ -121,6 +121,41 @@
+         active_rects, MP_ARRAY_SIZE(active_rects), &active,
+         modified_rects, MP_ARRAY_SIZE(modified_rects), &modified);
+     if (overlay) {
++        if (mp_msg_test(vo->log, MSGL_DEBUG)) {
++            int transparent = 0, partial = 0, opaque = 0, bitmaps = 0;
++            for (int i = 0; i < list->num_items; i++) {
++                struct sub_bitmaps *sb = list->items[i];
++                if (sb->format != SUBBITMAP_BGRA) continue;
++                for (int n = 0; n < sb->num_parts; n++) {
++                    struct sub_bitmap *b = &sb->parts[n];
++                    bitmaps++;
++                    for (int y = 0; y < b->h; y++) {
++                        uint8_t *row = (uint8_t *)b->bitmap + y * b->stride;
++                        for (int x = 0; x < b->w; x++) {
++                            unsigned a = row[4*x+3];
++                            transparent += a == 0; opaque += a == 255;
++                            partial += a > 0 && a < 255;
++                        }
++                    }
++                }
++            }
++            if (bitmaps) {
++                int out_clear = 0, out_partial = 0, out_opaque = 0;
++                for (int n = 0; n < active; n++) {
++                    struct mp_rect rc = active_rects[n];
++                    for (int y = rc.y0; y < rc.y1; y++) {
++                        uint8_t *row = overlay->planes[0] + y * overlay->stride[0];
++                        for (int x = rc.x0; x < rc.x1; x++) {
++                            unsigned a = row[4*x+3];
++                            out_clear += a == 0; out_opaque += a == 255;
++                            out_partial += a > 0 && a < 255;
++                        }
++                    }
++                }
++                MP_DBG(vo, "Bitmap alpha: parts=%d source=%d/%d/%d output=%d/%d/%d (clear/partial/opaque)\n",
++                       bitmaps, transparent, partial, opaque, out_clear, out_partial, out_opaque);
++            }
++        }
+         ANativeWindow_Buffer buffer;
+         if (ANativeWindow_lock(p->subtitle_window, &buffer, NULL) == 0) {
+             // Premultiplied BGRA from libass/bitmap subtitle composition -> RGBA.

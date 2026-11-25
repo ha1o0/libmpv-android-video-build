@@ -1,0 +1,50 @@
+--- a/libavcodec/mediacodec_dovi.h
++++ b/libavcodec/mediacodec_dovi.h
+@@ -11,6 +11,7 @@
+ 
+ typedef struct FFMediaCodecDovi {
+     int enabled;
++    int allow_yuv_surface;
+     DOVIContext parser;
+     H2645Packet packet;
+     /* Snapshots are keyed by the timestamp MediaCodec returns, not decode order. */
+--- a/libavcodec/mediacodecdec.c
++++ b/libavcodec/mediacodecdec.c
+@@ -62,6 +62,7 @@
+     int use_ndk_codec;
+     // Ref. MediaFormat KEY_OPERATING_RATE
+     int operating_rate;
++    int dovi_yuv;
+ #if CONFIG_HEVC_MEDIACODEC_DECODER
+     FFMediaCodecDovi dovi;
+ #endif
+@@ -326,6 +327,7 @@
+ 
+ #if CONFIG_HEVC_MEDIACODEC_DECODER
+     ff_mediacodec_dovi_init(&s->dovi, avctx);
++    s->dovi.allow_yuv_surface = s->dovi_yuv && s->dovi.parser.cfg.dv_profile == 8;
+ #endif
+ 
+     if (s->use_ndk_codec < 0)
+@@ -640,6 +642,8 @@
+                    OFFSET(use_ndk_codec), AV_OPT_TYPE_BOOL, {.i64 = -1}, -1, 1, VD },
+     { "operating_rate", "The desired operating rate that the codec will need to operate at, zero for unspecified",
+             OFFSET(operating_rate), AV_OPT_TYPE_INT, {.i64 = 0}, 0, INT_MAX, VD },
++    { "dovi_yuv", "The renderer guarantees raw YUV sampling before Dolby reshaping",
++            OFFSET(dovi_yuv), AV_OPT_TYPE_BOOL, {.i64 = 0}, 0, 1, VD },
+     { NULL }
+ };
+ 
+--- a/libavcodec/mediacodec_dovi.c
++++ b/libavcodec/mediacodec_dovi.c
+@@ -120,7 +120,9 @@
+     if (!s->enabled)
+         return 0;
+     /* Do not let an opaque RGB conversion or 8-bit output reach gpu-next as P5. */
+-    if (frame->format != AV_PIX_FMT_P010LE) {
++    if (frame->format != AV_PIX_FMT_P010LE &&
++        !(s->allow_yuv_surface && s->parser.cfg.dv_profile == 8 &&
++          frame->format == AV_PIX_FMT_MEDIACODEC)) {
+         av_log(avctx, AV_LOG_ERROR, "P5 hardware decode requires P010 output\n");
+         return AVERROR(ENOSYS);
+     }

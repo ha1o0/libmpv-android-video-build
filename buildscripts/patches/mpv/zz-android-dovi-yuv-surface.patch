@@ -1,0 +1,140 @@
+--- a/video/hwdec.h
++++ b/video/hwdec.h
+@@ -26,6 +26,9 @@
+     const int *supported_formats;
+     // HW format used by the hwdec
+     int hw_imgfmt;
++
++    // The renderer preserves raw YUV before applying Dolby RPU metadata.
++    bool dovi_yuv;
+ 
+     // Callback to test if the format can be uploaded.
+     // If NULL, all possible hwuploads are assumed to be supported.
+--- a/video/out/gpu/ra.h
++++ b/video/out/gpu/ra.h
+@@ -146,6 +146,7 @@
+     bool non_normalized;    // hack for GL_TEXTURE_RECTANGLE macOS idiocy
+                             // always set to false, except in macOS code
+     bool external_oes;      // hack for GL_TEXTURE_EXTERNAL_OES idiocy
++    bool external_yuv;      // GL_EXT_YUV_target raw YUV external sampling
+     // If non-NULL, the texture will be created with these contents. Using
+     // this does *not* require setting host_mutable. Otherwise, the initial
+     // data is undefined.
+--- a/video/out/hwdec/hwdec_aimagereader.c
++++ b/video/out/hwdec/hwdec_aimagereader.c
+@@ -30,6 +30,7 @@
+ #include "osdep/threads.h"
+ #include "osdep/timer.h"
+ #include "video/out/gpu/hwdec.h"
++#include "video/fmt-conversion.h"
+ #include "video/out/opengl/ra_gl.h"
+ 
+ typedef void *GLeglImageOES;
+@@ -179,6 +180,8 @@
+         .driver_name = hw->driver->name,
+         .av_device_ref = create_mediacodec_device_ref(p->surface),
+         .hw_imgfmt = IMGFMT_MEDIACODEC,
++        .dovi_yuv = gl->es >= 300 &&
++                    gl_check_extension(gl->extensions, "GL_EXT_YUV_target"),
+     };
+ 
+     if (!p->hwctx.av_device_ref) {
+@@ -254,7 +257,18 @@
+     o->AImageReader_setImageListener(o->reader, &listener);
+ 
+     mapper->dst_params = mapper->src_params;
+-    mapper->dst_params.imgfmt = IMGFMT_RGB0;
++    const bool raw_yuv = mapper->src_params.repr.sys == PL_COLOR_SYSTEM_DOLBYVISION;
++    if (raw_yuv && !o->hwctx.dovi_yuv)
++        return -1;
++    // VUYX supplies a packed YUV descriptor; gpu-next maps the sampler's
++    // actual Y,U,V component order explicitly, without an RGB conversion.
++    mapper->dst_params.imgfmt = raw_yuv ? pixfmt2imgfmt(AV_PIX_FMT_VUYX) : IMGFMT_RGB0;
++    if (raw_yuv) {
++        mapper->dst_params.repr.bits = (struct pl_bit_encoding) {
++            .sample_depth = 10, .color_depth = 10,
++        };
++        MP_VERBOSE(mapper, "Dolby Vision: sampling raw 10-bit YUV on GPU.\n");
++    }
+     mapper->dst_params.hw_subfmt = 0;
+ 
+     // texture creation
+@@ -275,6 +289,7 @@
+         .render_src = true,
+         .src_linear = true,
+         .external_oes = true,
++        .external_yuv = raw_yuv,
+     };
+ 
+     if (params.format->ctype != RA_CTYPE_UNORM)
+--- a/video/out/vo_gpu_next.c
++++ b/video/out/vo_gpu_next.c
+@@ -661,6 +661,7 @@
+         struct pl_opengl_wrap_params par = {
+             .width = ratex->params.w,
+             .height = ratex->params.h,
++            .external_yuv = ratex->params.external_yuv,
+         };
+ 
+         ra_gl_get_format(ratex->params.format, &par.iformat,
+@@ -882,6 +883,11 @@
+         for (int n = 0; n < frame->num_planes; n++) {
+             struct pl_plane *plane = &frame->planes[n];
+             int *map = plane->component_mapping;
++            if (p->hwdec_mapper->tex[n]->params.external_yuv) {
++                plane->components = 3;
++                map[0] = 0; map[1] = 1; map[2] = 2;
++                continue;
++            }
+             for (int c = 0; c < mp_imgfmt_desc_get_num_comps(&desc); c++) {
+                 if (desc.comps[c].plane != n)
+                     continue;
+--- a/video/decode/vd_lavc.c
++++ b/video/decode/vd_lavc.c
+@@ -488,8 +488,16 @@
+             hwdec_devices_get_by_imgfmt_and_type(ctx->hwdec_devs, imgfmt,
+                                                  hwdec->lavc_device);
+ 
+-        if (hw_ctx && hw_ctx->av_device_ref)
++        if (hw_ctx && hw_ctx->av_device_ref) {
++            if (ctx->codec->dovi && ctx->codec->dv_profile == 8 &&
++                hwdec->lavc_device == AV_HWDEVICE_TYPE_MEDIACODEC &&
++                (!hw_ctx->dovi_yuv || !ctx->vo ||
++                 strcmp(ctx->vo->driver->name, "gpu-next") != 0)) {
++                MP_VERBOSE(vd, "P8 raw YUV GPU sampling unavailable; using copy-back.\n");
++                return NULL;
++            }
+             return av_buffer_ref(hw_ctx->av_device_ref);
++        }
+     }
+ 
+     return NULL;
+@@ -560,11 +568,10 @@
+                 if (!hw_codec || strcmp(hw_codec, codec) != 0)
+                     continue;
+ 
+-                // P5/P8 need raw 10-bit components for Dolby reshaping. Android's
+-                // external OES texture path already converts them to RGB. Use
+-                // MediaCodec copy-back (P010 + per-frame RPU), then gpu-next.
+-                if (ctx->codec->dovi &&
+-                    (ctx->codec->dv_profile == 5 || ctx->codec->dv_profile == 8) &&
++                // Keep P5 on the established P010 path. P8 may use the raw
++                // YUV external sampler, but only after hwdec_create_dev has
++                // verified the renderer supports it; otherwise copy back.
++                if (ctx->codec->dovi && ctx->codec->dv_profile == 5 &&
+                     hwdec->codec->wrapper_name &&
+                     strcmp(hwdec->codec->wrapper_name, "mediacodec") == 0 &&
+                     !hwdec->copying) {
+@@ -882,6 +889,12 @@
+     }
+ #endif
+ 
++    if (ctx->use_hwdec && !ctx->hwdec.copying && c->dovi && c->dv_profile == 8 &&
++        lavc_codec->wrapper_name && !strcmp(lavc_codec->wrapper_name, "mediacodec")) {
++        if (av_opt_set_int(avctx, "dovi_yuv", 1, AV_OPT_SEARCH_CHILDREN) < 0)
++            goto error;
++    }
++
+     /* open it */
+     if (avcodec_open2(avctx, lavc_codec, NULL) < 0)
+         goto error;

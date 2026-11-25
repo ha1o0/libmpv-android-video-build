@@ -1,0 +1,34 @@
+--- a/libavcodec/mediacodec_dovi.c
++++ b/libavcodec/mediacodec_dovi.c
+@@ -10,12 +10,11 @@
+ {
+     const AVPacketSideData *sd;
+     s->parser.logctx = avctx;
+-    if (avctx->codec_id != AV_CODEC_ID_HEVC)
+-        return;
+     sd = ff_get_coded_side_data(avctx, AV_PKT_DATA_DOVI_CONF);
+     if (sd && sd->size >= sizeof(s->parser.cfg)) {
+         s->parser.cfg = *(const AVDOVIDecoderConfigurationRecord *)sd->data;
+-        s->enabled = s->parser.cfg.rpu_present_flag &&
++        s->enabled = avctx->codec_id == AV_CODEC_ID_HEVC &&
++            s->parser.cfg.rpu_present_flag &&
+             (s->parser.cfg.dv_profile == 5 || s->parser.cfg.dv_profile == 8 ||
+              s->parser.cfg.dv_profile == 20);
+     }
+--- a/libavcodec/mediacodecdec.c
++++ b/libavcodec/mediacodecdec.c
+@@ -350,6 +350,14 @@
+ #if CONFIG_AV1_MEDIACODEC_DECODER
+     case AV_CODEC_ID_AV1:
+         codec_mime = "video/av01";
++#if CONFIG_HEVC_MEDIACODEC_DECODER
++        if (s->dovi_native && s->dovi.parser.cfg.dv_profile == 10) {
++            codec_mime = "video/dolby-vision";
++            /* Android DolbyVisionProfileDvav110. */
++            ff_AMediaFormat_setInt32(format, "profile", 1024);
++            av_log(avctx, AV_LOG_INFO, "Dolby Vision P10: native AV1 decoder surface output\n");
++        }
++#endif
+ 
+         ret = common_set_extradata(avctx, format);
+         if (ret < 0)

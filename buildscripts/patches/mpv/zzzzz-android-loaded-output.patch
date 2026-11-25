@@ -1,0 +1,23 @@
+--- a/player/command.c
++++ b/player/command.c
+@@ -8364,10 +8364,16 @@
+     if (flags & UPDATE_VO && mpctx->video_out) {
+         struct track *track = mpctx->current_track[0][STREAM_VIDEO];
+         uninit_video_out(mpctx);
+-        handle_force_window(mpctx, true);
+-        reinit_video_chain(mpctx);
+-        if (track)
+-            queue_seek(mpctx, MPSEEK_RELATIVE, 0.0, MPSEEK_EXACT, 0);
++        // on_loaded runs after track selection, before loadfile initializes
++        // the decoder. Rebuilding here would create a second vo_chain when
++        // that hook returns, and can bind MediaCodec to a temporary Surface.
++        // Keep option changes, and let loadfile create the final chain once.
++        if (mpctx->playback_initialized || !mpctx->demuxer) {
++            handle_force_window(mpctx, true);
++            reinit_video_chain(mpctx);
++            if (track)
++                queue_seek(mpctx, MPSEEK_RELATIVE, 0.0, MPSEEK_EXACT, 0);
++        }
+ 
+         mp_wakeup_core(mpctx);
+     }

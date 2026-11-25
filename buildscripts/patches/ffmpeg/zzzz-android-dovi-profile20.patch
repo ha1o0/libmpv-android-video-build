@@ -1,0 +1,12 @@
+--- a/libavcodec/mediacodec_dovi.c
++++ b/libavcodec/mediacodec_dovi.c
+@@ -16,7 +16,8 @@
+     if (sd && sd->size >= sizeof(s->parser.cfg)) {
+         s->parser.cfg = *(const AVDOVIDecoderConfigurationRecord *)sd->data;
+         s->enabled = s->parser.cfg.rpu_present_flag &&
+-            (s->parser.cfg.dv_profile == 5 || s->parser.cfg.dv_profile == 8);
++            (s->parser.cfg.dv_profile == 5 || s->parser.cfg.dv_profile == 8 ||
++             s->parser.cfg.dv_profile == 20);
+     }
+ }
+ 

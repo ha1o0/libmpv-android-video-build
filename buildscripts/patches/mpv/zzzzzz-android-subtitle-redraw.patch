@@ -1,0 +1,20 @@
+--- a/video/out/vo_mediacodec_embed.c
++++ b/video/out/vo_mediacodec_embed.c
+@@ -180,6 +180,17 @@
+ 
+ static int control(struct vo *vo, uint32_t request, void *data)
+ {
++    struct priv *p = vo->priv;
++    if (request == VOCTRL_REDRAW) {
++        // NORETAIN intentionally releases decoder buffers immediately. The
++        // separate subtitle plane can still redraw at the paused video PTS.
++        draw_subtitles(vo, p->subtitle_pts);
++        return VO_TRUE;
++    }
++    if (request == VOCTRL_RESET) {
++        mp_image_unrefp(&p->next_image);
++        return VO_TRUE;
++    }
+     if (request == VOCTRL_SET_PANSCAN || request == VOCTRL_UPDATE_WINDOW_TITLE)
+         return VO_TRUE;
+     return VO_NOTIMPL;

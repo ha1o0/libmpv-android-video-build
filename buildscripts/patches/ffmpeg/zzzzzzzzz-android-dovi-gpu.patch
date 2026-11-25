@@ -1,0 +1,31 @@
+--- a/libavcodec/mediacodecdec.c
++++ b/libavcodec/mediacodecdec.c
+@@ -378,7 +378,8 @@
+ 
+ #if CONFIG_HEVC_MEDIACODEC_DECODER
+     ff_mediacodec_dovi_init(&s->dovi, avctx);
+-    s->dovi.allow_yuv_surface = s->dovi_yuv && s->dovi.parser.cfg.dv_profile == 8;
++    s->dovi.allow_yuv_surface = s->dovi_yuv &&
++        (s->dovi.parser.cfg.dv_profile == 5 || s->dovi.parser.cfg.dv_profile == 8);
+     // A Dolby-capable decoder owns the RPU when rendering directly. Attaching
+     // it again to an RGB output would apply reshaping twice.
+     if (s->dovi_native && (s->dovi.parser.cfg.dv_profile == 5 ||
+--- a/libavcodec/mediacodec_dovi.c
++++ b/libavcodec/mediacodec_dovi.c
+@@ -163,11 +163,13 @@
+     int slot = -1, ret = 0;
+     if (!s->enabled)
+         return 0;
+-    /* Do not let an opaque RGB conversion or 8-bit output reach gpu-next as P5. */
++    /* Surface frames are valid only when the renderer explicitly guarantees
++     * raw YUV sampling. Ordinary RGB external textures cannot carry the RPU. */
+     if (frame->format != AV_PIX_FMT_P010LE &&
+-        !(s->allow_yuv_surface && s->parser.cfg.dv_profile == 8 &&
++        !(s->allow_yuv_surface &&
++          (s->parser.cfg.dv_profile == 5 || s->parser.cfg.dv_profile == 8) &&
+           frame->format == AV_PIX_FMT_MEDIACODEC)) {
+-        av_log(avctx, AV_LOG_ERROR, "P5 hardware decode requires P010 output\n");
++        av_log(avctx, AV_LOG_ERROR, "Dolby Vision requires P010 or verified raw YUV Surface output\n");
+         return AVERROR(ENOSYS);
+     }
+     for (int i = 0; i < FF_MEDIACODEC_DOVI_PENDING; i++) {

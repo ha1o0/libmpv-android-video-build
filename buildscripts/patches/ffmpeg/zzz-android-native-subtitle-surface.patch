@@ -1,0 +1,60 @@
+--- a/libavcodec/mediacodecdec.c
++++ b/libavcodec/mediacodecdec.c
+@@ -63,6 +63,7 @@
+     // Ref. MediaFormat KEY_OPERATING_RATE
+     int operating_rate;
+     int dovi_yuv;
++    int dovi_native;
+ #if CONFIG_HEVC_MEDIACODEC_DECODER
+     FFMediaCodecDovi dovi;
+ #endif
+@@ -328,6 +329,11 @@
+ #if CONFIG_HEVC_MEDIACODEC_DECODER
+     ff_mediacodec_dovi_init(&s->dovi, avctx);
+     s->dovi.allow_yuv_surface = s->dovi_yuv && s->dovi.parser.cfg.dv_profile == 8;
++    // A Dolby-capable decoder owns the RPU when rendering directly. Attaching
++    // it again to an RGB output would apply reshaping twice.
++    if (s->dovi_native && (s->dovi.parser.cfg.dv_profile == 5 ||
++                           s->dovi.parser.cfg.dv_profile == 8))
++        s->dovi.enabled = 0;
+ #endif
+ 
+     if (s->use_ndk_codec < 0)
+@@ -362,6 +368,13 @@
+ #if CONFIG_HEVC_MEDIACODEC_DECODER
+     case AV_CODEC_ID_HEVC:
+         codec_mime = "video/hevc";
++        if (s->dovi_native && (s->dovi.parser.cfg.dv_profile == 5 ||
++                               s->dovi.parser.cfg.dv_profile == 8)) {
++            codec_mime = "video/dolby-vision";
++            ff_AMediaFormat_setInt32(format, "profile",
++                    s->dovi.parser.cfg.dv_profile == 5 ? 32 : 256);
++            av_log(avctx, AV_LOG_INFO, "Dolby Vision: native decoder surface output\n");
++        }
+         if (s->dovi.enabled) {
+             /* Android COLOR_FormatYUVP010; no platform YUV-to-RGB conversion. */
+             ff_AMediaFormat_setInt32(format, "color-format", 54);
+@@ -644,6 +657,8 @@
+             OFFSET(operating_rate), AV_OPT_TYPE_INT, {.i64 = 0}, 0, INT_MAX, VD },
+     { "dovi_yuv", "The renderer guarantees raw YUV sampling before Dolby reshaping",
+             OFFSET(dovi_yuv), AV_OPT_TYPE_BOOL, {.i64 = 0}, 0, 1, VD },
++    { "dovi_native", "A Dolby-capable display surface owns Dolby decoding and composition",
++            OFFSET(dovi_native), AV_OPT_TYPE_BOOL, {.i64 = 0}, 0, 1, VD },
+     { NULL }
+ };
+ 
+--- a/libavcodec/mediacodecdec_common.c
++++ b/libavcodec/mediacodecdec_common.c
+@@ -796,6 +796,12 @@
+     }
+ 
+     profile = ff_AMediaCodecProfile_getProfileFromAVCodecContext(avctx);
++    // MediaCodec Dolby profiles use a separate namespace from HEVC Main10.
++    if (!strcmp(mime, "video/dolby-vision")) {
++        int32_t dv_profile = -1;
++        ff_AMediaFormat_getInt32(format, "profile", &dv_profile);
++        profile = dv_profile;
++    }
+     if (profile < 0) {
+         av_log(avctx, AV_LOG_WARNING, "Unsupported or unknown profile\n");
+     }

@@ -1,0 +1,33 @@
+--- a/video/decode/vd_lavc.c
++++ b/video/decode/vd_lavc.c
+@@ -493,12 +493,13 @@
+                                                  hwdec->lavc_device);
+ 
+         if (hw_ctx && hw_ctx->av_device_ref) {
+-            if (ctx->codec->dovi && ctx->codec->dv_profile == 8 &&
++            if (ctx->codec->dovi &&
++                (ctx->codec->dv_profile == 5 || ctx->codec->dv_profile == 8) &&
+                 hwdec->lavc_device == AV_HWDEVICE_TYPE_MEDIACODEC &&
+                 !hw_ctx->dovi_native &&
+                 (!hw_ctx->dovi_yuv || !ctx->vo ||
+                  strcmp(ctx->vo->driver->name, "gpu-next") != 0)) {
+-                MP_VERBOSE(vd, "P8 raw YUV GPU sampling unavailable; using copy-back.\n");
++                MP_VERBOSE(vd, "Dolby Vision raw YUV GPU sampling unavailable; using copy-back.\n");
+                 return NULL;
+             }
+             return av_buffer_ref(hw_ctx->av_device_ref);
+@@ -573,11 +574,9 @@
+                 if (!hw_codec || strcmp(hw_codec, codec) != 0)
+                     continue;
+ 
+-                // Keep P5 on the established P010 path. P8 may use the raw
+-                // YUV external sampler, but only after hwdec_create_dev has
+-                // verified the renderer supports it; otherwise copy back.
+-                if (ctx->codec->dovi &&
+-                    (ctx->codec->dv_profile == 5 || ctx->codec->dv_profile == 20) &&
++                // P5/P8 use raw GPU sampling only after hwdec_create_dev checks
++                // the renderer. P20 keeps its established P010/base-view path.
++                if (ctx->codec->dovi && ctx->codec->dv_profile == 20 &&
+                     !(ctx->vo && !strcmp(ctx->vo->driver->name, "mediacodec_embed") &&
+                       ctx->vo->opts->android_subtitle_wid) &&
+                     hwdec->codec->wrapper_name &&

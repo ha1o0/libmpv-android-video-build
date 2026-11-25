@@ -104,6 +104,26 @@ static void metadata_tests(void)
     assert(ff_mediacodec_dovi_attach(&dovi, ctx, frame) < 0);
     frame->format = AV_PIX_FMT_MEDIACODEC;
     assert(ff_mediacodec_dovi_attach(&dovi, ctx, frame) < 0);
+    dovi.allow_yuv_surface = 1;
+    assert(ff_mediacodec_dovi_attach(&dovi, ctx, frame) == 0);
+    AVFrameSideData *surface_rpu = av_frame_get_side_data(frame,
+        AV_FRAME_DATA_DOVI_RPU_BUFFER);
+    assert(surface_rpu && surface_rpu->size == sizeof(rpu_a));
+    assert(!memcmp(surface_rpu->data, rpu_a, sizeof(rpu_a)));
+    assert(av_frame_get_side_data(frame, AV_FRAME_DATA_DOVI_METADATA));
+    assert(ff_mediacodec_dovi_attach(&dovi, ctx, frame) < 0);
+    av_frame_unref(frame);
+    /* Even an opted-in renderer must never receive 8-bit pixels as Dolby. */
+    submit(&dovi, ctx, rpu_b, sizeof(rpu_b), 1001);
+    frame->pts = 1001;
+    frame->format = AV_PIX_FMT_NV12;
+    assert(ff_mediacodec_dovi_attach(&dovi, ctx, frame) < 0);
+    frame->format = AV_PIX_FMT_MEDIACODEC;
+    assert(ff_mediacodec_dovi_attach(&dovi, ctx, frame) == 0);
+    surface_rpu = av_frame_get_side_data(frame, AV_FRAME_DATA_DOVI_RPU_BUFFER);
+    assert(surface_rpu && surface_rpu->size == sizeof(rpu_b));
+    assert(!memcmp(surface_rpu->data, rpu_b, sizeof(rpu_b)));
+    puts("PASS: P5 raw Surface opt-in preserves each RPU and rejects 8-bit pixels");
     ff_mediacodec_dovi_flush(&dovi);
     for (int i = 0; i < FF_MEDIACODEC_DOVI_PENDING; i++)
         submit(&dovi, ctx, rpu_a, sizeof(rpu_a), i);
@@ -147,6 +167,20 @@ static void profile8_tests(void)
         ff_mediacodec_dovi_flush(&dovi);
         submit(&dovi, ctx, samples[sample], sizes[sample], 1000);
         receive(&dovi, ctx, samples[sample], sizes[sample], 1000);
+        /* Surface transport must be explicit and preserve the exact RPU. */
+        AVFrame *frame = av_frame_alloc();
+        frame->format = AV_PIX_FMT_MEDIACODEC;
+        frame->pts = 2000;
+        submit(&dovi, ctx, samples[sample], sizes[sample], 2000);
+        assert(ff_mediacodec_dovi_attach(&dovi, ctx, frame) < 0);
+        dovi.allow_yuv_surface = 1;
+        assert(ff_mediacodec_dovi_attach(&dovi, ctx, frame) == 0);
+        AVFrameSideData *sd = av_frame_get_side_data(frame, AV_FRAME_DATA_DOVI_RPU_BUFFER);
+        assert(sd && sd->size == sizes[sample]);
+        assert(!memcmp(sd->data, samples[sample], sd->size));
+        assert(av_frame_get_side_data(frame, AV_FRAME_DATA_DOVI_METADATA));
+        assert(ff_mediacodec_dovi_attach(&dovi, ctx, frame) < 0);
+        av_frame_free(&frame);
         ff_mediacodec_dovi_close(&dovi);
         avcodec_free_context(&ctx);
     }
@@ -160,6 +194,54 @@ static void profile8_tests(void)
     ff_mediacodec_dovi_close(&dovi);
     avcodec_free_context(&ctx);
     puts("PASS: a Dolby-tagged base layer without RPU retains ordinary decoding");
+}
+
+static void extended_profile_tests(void)
+{
+    FFMediaCodecDovi dovi = {0};
+    AVCodecContext *ctx = context(10);
+    ctx->codec_id = AV_CODEC_ID_AV1;
+    ff_mediacodec_dovi_init(&dovi, ctx);
+    assert(dovi.parser.cfg.dv_profile == 10 && !dovi.enabled);
+    ff_mediacodec_dovi_close(&dovi);
+    avcodec_free_context(&ctx);
+    puts("PASS: AV1 P10 configuration reaches native selection without HEVC RPU parsing");
+
+    memset(&dovi, 0, sizeof(dovi));
+    ctx = context(20);
+    ff_mediacodec_dovi_init(&dovi, ctx);
+    assert(dovi.enabled);
+    AVPacket *pkt = packet(rpu_p8, sizeof(rpu_p8), 9000);
+    const int base_size = pkt->size;
+    /* A second-view VCL NAL has nuh_layer_id=1. Keep only the base view
+     * without losing its RPU, timing, flags or packet side data. */
+    const uint8_t extra[] = {0,0,1,2,9,0x80};
+    assert(av_grow_packet(pkt, sizeof(extra)) == 0);
+    memcpy(pkt->data + base_size, extra, sizeof(extra));
+    pkt->dts = 6000;
+    pkt->flags = AV_PKT_FLAG_KEY;
+    assert(ff_mediacodec_dovi_submit(&dovi, ctx, pkt) == 0);
+    assert(pkt->size < base_size + sizeof(extra));
+    assert(pkt->pts == 9000 && pkt->dts == 6000);
+    H2645Packet filtered = {0};
+    assert(ff_h2645_packet_split(&filtered, pkt->data, pkt->size, ctx, 0,
+                                AV_CODEC_ID_HEVC, H2645_FLAG_SMALL_PADDING) == 0);
+    assert(filtered.nb_nals == 2);
+    assert(filtered.nals[0].nuh_layer_id == 0 && filtered.nals[0].type == 1);
+    assert(filtered.nals[1].nuh_layer_id == 0 && filtered.nals[1].type == 62);
+    ff_h2645_packet_uninit(&filtered);
+    assert(pkt->flags & AV_PKT_FLAG_KEY);
+    AVFrame *surface = av_frame_alloc();
+    surface->format = AV_PIX_FMT_MEDIACODEC;
+    surface->pts = 9000;
+    dovi.allow_yuv_surface = 1;
+    assert(ff_mediacodec_dovi_attach(&dovi, ctx, surface) < 0);
+    av_frame_free(&surface);
+    receive(&dovi, ctx, rpu_p8, sizeof(rpu_p8), 9000);
+    av_packet_free(&pkt);
+    ff_mediacodec_dovi_close(&dovi);
+    avcodec_free_context(&ctx);
+    puts("PASS: P20 base-view transport preserves timestamps and Dolby metadata");
 }
 
 static void p010_tests(void)
@@ -184,4 +266,4 @@ static void p010_tests(void)
     puts("PASS: invalid P010 layouts and arithmetic boundaries are rejected");
 }
 
-int main(void) { metadata_tests(); profile8_tests(); p010_tests(); return 0; }
+int main(void) { metadata_tests(); profile8_tests(); extended_profile_tests(); p010_tests(); return 0; }

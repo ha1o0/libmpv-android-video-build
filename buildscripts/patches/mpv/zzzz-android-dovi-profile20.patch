@@ -1,0 +1,12 @@
+--- a/video/decode/vd_lavc.c
++++ b/video/decode/vd_lavc.c
+@@ -572,7 +572,8 @@
+                 // Keep P5 on the established P010 path. P8 may use the raw
+                 // YUV external sampler, but only after hwdec_create_dev has
+                 // verified the renderer supports it; otherwise copy back.
+-                if (ctx->codec->dovi && ctx->codec->dv_profile == 5 &&
++                if (ctx->codec->dovi &&
++                    (ctx->codec->dv_profile == 5 || ctx->codec->dv_profile == 20) &&
+                     !(ctx->vo && !strcmp(ctx->vo->driver->name, "mediacodec_embed") &&
+                       ctx->vo->opts->android_subtitle_wid) &&
+                     hwdec->codec->wrapper_name &&

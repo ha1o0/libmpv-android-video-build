@@ -1,0 +1,221 @@
+--- a/options/options.h
++++ b/options/options.h
+@@ -87,6 +87,7 @@
+ 
+     struct m_geometry android_surface_size;
+     int android_hdr_capabilities;
++    int64_t android_subtitle_wid;
+ 
+     struct m_geometry d3d11_composition_size;
+ 
+--- a/options/options.c
++++ b/options/options.c
+@@ -251,6 +251,7 @@
+ #if HAVE_EGL_ANDROID
+     {"android-surface-size", OPT_SIZE_BOX(android_surface_size)},
+     {"android-hdr-capabilities", OPT_INT(android_hdr_capabilities), M_RANGE(0, 3)},
++    {"android-subtitle-wid", OPT_INT64(android_subtitle_wid)},
+ #endif
+ #if HAVE_D3D11
+     {"d3d11-composition-size", OPT_SIZE_BOX(d3d11_composition_size)},
+--- a/video/hwdec.h
++++ b/video/hwdec.h
+@@ -29,6 +29,7 @@
+ 
+     // The renderer preserves raw YUV before applying Dolby RPU metadata.
+     bool dovi_yuv;
++    bool dovi_native;
+ 
+     // Callback to test if the format can be uploaded.
+     // If NULL, all possible hwuploads are assumed to be supported.
+--- a/video/decode/vd_lavc.c
++++ b/video/decode/vd_lavc.c
+@@ -491,6 +491,7 @@
+         if (hw_ctx && hw_ctx->av_device_ref) {
+             if (ctx->codec->dovi && ctx->codec->dv_profile == 8 &&
+                 hwdec->lavc_device == AV_HWDEVICE_TYPE_MEDIACODEC &&
++                !hw_ctx->dovi_native &&
+                 (!hw_ctx->dovi_yuv || !ctx->vo ||
+                  strcmp(ctx->vo->driver->name, "gpu-next") != 0)) {
+                 MP_VERBOSE(vd, "P8 raw YUV GPU sampling unavailable; using copy-back.\n");
+@@ -572,6 +573,8 @@
+                 // YUV external sampler, but only after hwdec_create_dev has
+                 // verified the renderer supports it; otherwise copy back.
+                 if (ctx->codec->dovi && ctx->codec->dv_profile == 5 &&
++                    !(ctx->vo && !strcmp(ctx->vo->driver->name, "mediacodec_embed") &&
++                      ctx->vo->opts->android_subtitle_wid) &&
+                     hwdec->codec->wrapper_name &&
+                     strcmp(hwdec->codec->wrapper_name, "mediacodec") == 0 &&
+                     !hwdec->copying) {
+@@ -889,9 +892,14 @@
+     }
+ #endif
+ 
+-    if (ctx->use_hwdec && !ctx->hwdec.copying && c->dovi && c->dv_profile == 8 &&
++    if (ctx->use_hwdec && !ctx->hwdec.copying && c->dovi &&
++        (c->dv_profile == 5 || c->dv_profile == 8) &&
+         lavc_codec->wrapper_name && !strcmp(lavc_codec->wrapper_name, "mediacodec")) {
+-        if (av_opt_set_int(avctx, "dovi_yuv", 1, AV_OPT_SEARCH_CHILDREN) < 0)
++        const bool direct = ctx->vo &&
++            !strcmp(ctx->vo->driver->name, "mediacodec_embed") &&
++            ctx->vo->opts->android_subtitle_wid;
++        if (av_opt_set_int(avctx, direct ? "dovi_native" : "dovi_yuv", 1,
++                          AV_OPT_SEARCH_CHILDREN) < 0)
+             goto error;
+     }
+ 
+--- a/video/out/vo_mediacodec_embed.c
++++ b/video/out/vo_mediacodec_embed.c
+@@ -20,6 +20,11 @@
+ #include <libavutil/hwcontext_mediacodec.h>
+ 
+ #include "common/common.h"
++#include <android/native_window_jni.h>
++#include <string.h>
++#include "misc/jni.h"
++#include "sub/osd.h"
++#include "sub/draw_bmp.h"
+ #include "vo.h"
+ #include "video/mp_image.h"
+ #include "video/hwdec.h"
+@@ -27,6 +32,12 @@
+ struct priv {
+     struct mp_image *next_image;
+     struct mp_hwdec_ctx hwctx;
++    ANativeWindow *subtitle_window;
++    struct mp_draw_sub_cache *subtitle_cache;
++    int64_t subtitle_change_id;
++    int subtitle_width, subtitle_height;
++    double subtitle_pts;
++    bool have_subtitle_frame;
+ };
+ 
+ static AVBufferRef *create_mediacodec_device_ref(struct vo *vo)
+@@ -50,10 +61,19 @@
+ {
+     struct priv *p = vo->priv;
+     vo->hwdec_devs = hwdec_devices_create();
++    if (vo->opts->android_subtitle_wid) {
++        JNIEnv *env = MP_JNI_GET_ENV(vo);
++        if (!env) return -1;
++        p->subtitle_window = ANativeWindow_fromSurface(env,
++            (jobject)(intptr_t)vo->opts->android_subtitle_wid);
++        if (!p->subtitle_window) return -1;
++        p->subtitle_cache = mp_draw_sub_alloc(p, vo->global);
++    }
+     p->hwctx = (struct mp_hwdec_ctx){
+         .driver_name = "mediacodec_embed",
+         .av_device_ref = create_mediacodec_device_ref(vo),
+         .hw_imgfmt = IMGFMT_MEDIACODEC,
++        .dovi_native = p->subtitle_window != NULL,
+     };
+ 
+     if (!p->hwctx.av_device_ref) {
+@@ -65,9 +85,72 @@
+     return 0;
+ }
+ 
++
++// The video remains in MediaCodec's surface queue. Only changed subtitle
++// pixels cross the CPU/compositor boundary, using mpv's own OSD/libass state.
++static void draw_subtitles(struct vo *vo, double pts)
++{
++    struct priv *p = vo->priv;
++    if (!p->subtitle_window || !p->subtitle_cache) return;
++    int width = vo->opts->android_surface_size.w;
++    int height = vo->opts->android_surface_size.h;
++    if (width <= 0 || height <= 0) return;
++    // A separate overlay never needs the source's 8K allocation. Keep its
++    // aspect ratio so the native view can use the same video fit geometry.
++    double scale = MPMIN(1.0, 1920.0 / MPMAX(width, height));
++    width = MPMAX(2, (int)(width * scale + .5));
++    height = MPMAX(2, (int)(height * scale + .5));
++    bool resized = width != p->subtitle_width || height != p->subtitle_height;
++    if (resized) {
++        if (ANativeWindow_setBuffersGeometry(p->subtitle_window, width, height,
++                                            WINDOW_FORMAT_RGBA_8888) < 0) return;
++        p->subtitle_width = width; p->subtitle_height = height;
++        p->have_subtitle_frame = false;
++    }
++    struct mp_osd_res res = {.w = width, .h = height, .display_par = 1};
++    struct sub_bitmap_list *list = osd_render(vo->osd, res, pts, 0,
++                                             mp_draw_sub_formats);
++    if (!list) return;
++    if (p->have_subtitle_frame && list->change_id == p->subtitle_change_id) {
++        talloc_free(list);
++        return;
++    }
++    int active = 0, modified = 0;
++    struct mp_rect active_rects[64], modified_rects[64];
++    struct mp_image *overlay = mp_draw_sub_overlay(p->subtitle_cache, list,
++        active_rects, MP_ARRAY_SIZE(active_rects), &active,
++        modified_rects, MP_ARRAY_SIZE(modified_rects), &modified);
++    if (overlay) {
++        ANativeWindow_Buffer buffer;
++        if (ANativeWindow_lock(p->subtitle_window, &buffer, NULL) == 0) {
++            // Premultiplied BGRA from libass/bitmap subtitle composition -> RGBA.
++            for (int y = 0; y < buffer.height; y++) {
++                uint8_t *out = (uint8_t *)buffer.bits + (size_t)y * buffer.stride * 4;
++                if (y >= height) {
++                    memset(out, 0, (size_t)buffer.width * 4);
++                    continue;
++                }
++                const uint8_t *in = overlay->planes[0] + y * overlay->stride[0];
++                int n = MPMIN(width, buffer.width);
++                for (int x = 0; x < n; x++) {
++                    out[4*x] = in[4*x+2]; out[4*x+1] = in[4*x+1];
++                    out[4*x+2] = in[4*x]; out[4*x+3] = in[4*x+3];
++                }
++                if (n < buffer.width) memset(out + n*4, 0, (buffer.width-n)*4);
++            }
++            ANativeWindow_unlockAndPost(p->subtitle_window);
++            MP_DBG(vo, "Subtitle overlay: active=%d pts=%.3f\n", active, pts);
++            p->subtitle_change_id = list->change_id;
++            p->have_subtitle_frame = true;
++        }
++    }
++    talloc_free(list);
++}
++
+ static void flip_page(struct vo *vo)
+ {
+     struct priv *p = vo->priv;
++    draw_subtitles(vo, p->subtitle_pts);
+     if (!p->next_image)
+         return;
+ 
+@@ -81,6 +163,7 @@
+     struct priv *p = vo->priv;
+ 
+     mp_image_t *mpi = NULL;
++    if (frame->current) p->subtitle_pts = frame->current->pts;
+     if (!frame->redraw && !frame->repeat)
+         mpi = mp_image_new_ref(frame->current);
+ 
+@@ -96,6 +179,8 @@
+ 
+ static int control(struct vo *vo, uint32_t request, void *data)
+ {
++    if (request == VOCTRL_SET_PANSCAN || request == VOCTRL_UPDATE_WINDOW_TITLE)
++        return VO_TRUE;
+     return VO_NOTIMPL;
+ }
+ 
+@@ -108,6 +193,17 @@
+ {
+     struct priv *p = vo->priv;
+     mp_image_unrefp(&p->next_image);
++    if (p->subtitle_window) {
++        ANativeWindow_Buffer buffer;
++        if (p->have_subtitle_frame && ANativeWindow_lock(p->subtitle_window, &buffer, NULL) == 0) {
++            for (int y = 0; y < buffer.height; y++)
++                memset((uint8_t *)buffer.bits + (size_t)y * buffer.stride * 4, 0,
++                       (size_t)buffer.width * 4);
++            ANativeWindow_unlockAndPost(p->subtitle_window);
++        }
++        ANativeWindow_release(p->subtitle_window);
++    }
++    p->subtitle_window = NULL;
+ 
+     hwdec_devices_remove(vo->hwdec_devs, &p->hwctx);
+     av_buffer_unref(&p->hwctx.av_device_ref);

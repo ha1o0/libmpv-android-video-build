@@ -1,0 +1,75 @@
+--- a/video/decode/vd_lavc.c
++++ b/video/decode/vd_lavc.c
+@@ -55,6 +55,10 @@
+ #include "video/out/vo.h"
+ 
+ #include "options/m_option.h"
++
++#if HAVE_ANDROID
++#include <libplacebo/utils/libav.h>
++#endif
+ 
+ static void init_avctx(struct mp_filter *vd);
+ static void uninit_avctx(struct mp_filter *vd);
+@@ -743,6 +747,47 @@
+     ctx->wait_for_keyframe = ctx->use_hwdec ? HWDEC_WAIT_KEYFRAME_COUNT : 0;
+ }
+ 
++#if HAVE_ANDROID
++// Matroska's Colour is stored outside lav_codecpar. A decoder Surface needs
++// this information at configuration time, before mpv can merge frame metadata.
++static int mediacodec_container_color(AVCodecContext *avctx,
++                                     const struct mp_codec_params *c)
++{
++    if (c->color.primaries && avctx->color_primaries == AVCOL_PRI_UNSPECIFIED)
++        avctx->color_primaries = pl_primaries_to_av(c->color.primaries);
++    if (c->color.transfer && avctx->color_trc == AVCOL_TRC_UNSPECIFIED)
++        avctx->color_trc = pl_transfer_to_av(c->color.transfer);
++    if (c->repr.sys && avctx->colorspace == AVCOL_SPC_UNSPECIFIED)
++        avctx->colorspace = pl_system_to_av(c->repr.sys);
++    if (c->repr.levels && avctx->color_range == AVCOL_RANGE_UNSPECIFIED)
++        avctx->color_range = pl_levels_to_av(c->repr.levels);
++
++    AVFrame *frame = av_frame_alloc();
++    if (!frame) return AVERROR(ENOMEM);
++    pl_avframe_set_color(frame, c->color);
++    int ret = 0;
++    for (int i = 0; i < frame->nb_side_data; i++) {
++        AVFrameSideData *sd = frame->side_data[i];
++        enum AVPacketSideDataType type;
++        if (sd->type == AV_FRAME_DATA_MASTERING_DISPLAY_METADATA)
++            type = AV_PKT_DATA_MASTERING_DISPLAY_METADATA;
++        else if (sd->type == AV_FRAME_DATA_CONTENT_LIGHT_LEVEL)
++            type = AV_PKT_DATA_CONTENT_LIGHT_LEVEL;
++        else
++            continue;
++        if (av_packet_side_data_get(avctx->coded_side_data,
++                                    avctx->nb_coded_side_data, type))
++            continue;
++        AVPacketSideData *dst = av_packet_side_data_new(&avctx->coded_side_data,
++            &avctx->nb_coded_side_data, type, sd->size, 0);
++        if (!dst) { ret = AVERROR(ENOMEM); break; }
++        memcpy(dst->data, sd->data, sd->size);
++    }
++    av_frame_free(&frame);
++    return ret;
++}
++#endif
++
+ static void init_avctx(struct mp_filter *vd)
+ {
+     vd_ffmpeg_ctx *ctx = vd->priv;
+@@ -885,6 +930,13 @@
+         MP_ERR(vd, "Could not set codec parameters.\n");
+         goto error;
+     }
++
++#if HAVE_ANDROID
++    if (lavc_codec->wrapper_name &&
++        !strcmp(lavc_codec->wrapper_name, "mediacodec") &&
++        mediacodec_container_color(avctx, c) < 0)
++        goto error;
++#endif
+ 
+ #ifdef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
+     if (avctx->width > 8192 || avctx->height > 8192) {
