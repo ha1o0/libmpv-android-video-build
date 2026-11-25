@@ -16,12 +16,23 @@ PATCH = ROOT / 'buildscripts/patches/mpv/android_hdr_surface.patch'
 def production_functions():
     additions = '\n'.join(line[1:] for line in PATCH.read_text().splitlines()
                           if line.startswith('+') and not line.startswith('+++'))
-    return additions[additions.index('static int android_refine_config'):
+    guard_start = additions.find('#ifndef EGL_GL_COLORSPACE_BT2020_HLG_EXT')
+    compatibility = ''
+    if guard_start >= 0:
+        guard_end = additions.index('#endif', guard_start) + len('#endif')
+        compatibility = additions[guard_start:guard_end] + '\n'
+    return compatibility + additions[additions.index('static int android_refine_config'):
                      additions.index('static pl_color_space_t android_preferred_csp')]
 
 
 class AndroidHdrSurfaceTest(unittest.TestCase):
     def test_source_display_depth_and_driver_must_agree(self):
+        self.check_negotiation(legacy_headers=False)
+
+    def test_old_ndk_headers_without_hlg_token(self):
+        self.check_negotiation(legacy_headers=True)
+
+    def check_negotiation(self, *, legacy_headers):
         stub = r'''
 #include <assert.h>
 #include <math.h>
@@ -117,11 +128,19 @@ int main(void) {
  opts.android_hdr_capabilities=3;extensions=all;reject_hdr=0;
  struct mp_image_params params={.color={.transfer=PL_COLOR_TRC_PQ,.primaries=1}};
  assert(android_set_color(&ctx,&params));assert(p.colorspace==10);
- params.color.transfer=PL_COLOR_TRC_HLG;assert(android_set_color(&ctx,&params));assert(p.colorspace==11);
+ params.color.transfer=PL_COLOR_TRC_HLG;assert(android_set_color(&ctx,&params));assert(p.colorspace==EGL_GL_COLORSPACE_BT2020_HLG_EXT);
  params.color=pl_color_space_srgb;assert(android_set_color(&ctx,&params));assert(p.colorspace==0);
  puts("Android HDR negotiation, SDR restoration, metadata and EGL context retention passed");
 }
 '''
+        expected_hlg = '11'
+        if legacy_headers:
+            stub = stub.replace('#define EGL_GL_COLORSPACE_BT2020_HLG_EXT 11\n', '')
+            expected_hlg = '0x3540'
+        # Exercise the actual guarded definition and its use in negotiation.
+        # Existing header definitions must survive; old headers need the
+        # official EGL_EXT_gl_colorspace_bt2020_hlg token from Khronos.
+        cases += f'\n_Static_assert(EGL_GL_COLORSPACE_BT2020_HLG_EXT == {expected_hlg}, "HLG token");\n'
         with tempfile.TemporaryDirectory() as td:
             src = Path(td) / 'probe.c'
             exe = Path(td) / 'probe'

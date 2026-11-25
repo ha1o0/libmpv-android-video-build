@@ -163,12 +163,17 @@ diff --git a/video/out/opengl/context_android.c b/video/out/opengl/context_andro
  #include <EGL/egl.h>
  #include <EGL/eglext.h>
  
-@@ -22,13 +23,173 @@
+@@ -22,13 +23,178 @@
  #include "egl_helpers.h"
  #include "common/common.h"
  #include "context.h"
 +#include "utils.h"
  
++// Older NDK EGL headers omit this Khronos extension token.
++#ifndef EGL_GL_COLORSPACE_BT2020_HLG_EXT
++#define EGL_GL_COLORSPACE_BT2020_HLG_EXT 0x3540
++#endif
++
  struct priv {
      struct GL gl;
      EGLDisplay egl_display;
@@ -337,7 +342,7 @@ diff --git a/video/out/opengl/context_android.c b/video/out/opengl/context_andro
  
  static void android_swap_buffers(struct ra_ctx *ctx)
  {
-@@ -66,9 +227,14 @@
+@@ -66,9 +232,14 @@
      }
  
      EGLConfig config;
@@ -355,7 +360,7 @@ diff --git a/video/out/opengl/context_android.c b/video/out/opengl/context_andro
      ANativeWindow *native_window = vo_android_native_window(ctx->vo);
      EGLint format;
      eglGetConfigAttrib(p->egl_display, config, EGL_NATIVE_VISUAL_ID, &format);
-@@ -92,6 +258,9 @@
+@@ -92,6 +263,9 @@
  
      struct ra_ctx_params params = {
          .swap_buffers = android_swap_buffers,
